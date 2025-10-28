@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/home/progamers/cpp_editor/lsp_test_project",
+    "command": "/usr/sbin/clang++ main.cpp -o main -std=c++17",
+    "file": "/home/progamers/cpp_editor/lsp_test_project/main.cpp"
+  }
+]
