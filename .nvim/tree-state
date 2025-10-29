@@ -1,8 +1,7 @@
--- nvim-tree state | last updated: 2025-10-28 14:07:54
+-- nvim-tree state | last updated: 2025-10-29 12:30:11
 return {
-  timestamp = 1761649674,
+  timestamp = 1761730211,
   open_dirs = {
-    ".nvim",
     "lsp_test_project",
     "sansio_lsp_client",
   },

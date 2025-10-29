@@ -1,8 +1,5 @@
-
-#include <vector>
-
+#include <iostream>
 int main() {
-    std::vector<int> numbers;
-    numbers.
-    return 0;
+  std::cou;
+  return 0;
 }
