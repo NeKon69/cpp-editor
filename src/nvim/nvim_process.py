@@ -51,10 +51,3 @@ class NvimProcess:
 
     def get(self):
         return self.nvim
-
-    def __enter__(self, *args):
-        self.start(*args)
-        return self
-
-    def __exit__(self, *args):
-        self.stop()

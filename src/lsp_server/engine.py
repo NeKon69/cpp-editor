@@ -1,6 +1,8 @@
 import threading
 import time
 from pathlib import Path
+from collections import deque
+import queue
 import sansio_lsp_client as lsp
 from src.common.vars import log
 from src.lsp_server.process import ClangdProcess
@@ -13,6 +15,8 @@ class LspEngine:
         self.opened_files = dict()
         self.diagnostics = dict()
         self.responses = dict()
+        self._response_lock = threading.Lock()
+        self._diagnostics_lock = threading.Lock()
         self.lsp_client = lsp.Client(
             root_uri=self.project_path.as_uri(), trace="verbose"
         )
@@ -21,6 +25,9 @@ class LspEngine:
         self._stop_event = threading.Event()
         self._background_thread = None
         self._initialized = False
+        self._init_event = threading.Event()
+        self._message_queue = deque()
+        self._queue_lock = threading.Lock()
 
     def __enter__(self):
         self.runner.__enter__()
@@ -35,7 +42,7 @@ class LspEngine:
     def __exit__(self, exc_type, exc_value, traceback):
         self._stop_event.set()
         if self._background_thread and self._background_thread.is_alive():
-            self._background_thread.join(timeout=1.0)
+            self._background_thread.join(timeout=2.0)
         self.runner.__exit__(exc_type, exc_value, traceback)
 
     def _send(self):
@@ -49,12 +56,12 @@ class LspEngine:
 
     def _read_and_process(self):
         try:
-            data = self.runner.process.stdout.read()
-            if data:
-                events = self.lsp_client.recv(data)
+            data = self.runner.read_queue.get_nowait()
+            if data[0] == "stdout":
+                events = self.lsp_client.recv(data[1])
                 for event in events:
                     self.handle_event(event)
-        except (IOError, BrokenPipeError):
+        except queue.Empty:
             pass
         except Exception as e:
             log(f"Error processing data: {e}")
@@ -63,15 +70,17 @@ class LspEngine:
         while not self._stop_event.is_set():
             try:
                 self._read_and_process()
-                time.sleep(0.05)
+                self._send()
+                time.sleep(0.01)
             except Exception as e:
                 log(f"Error in background tick: {e}")
 
     def wait_for_response(self, msg_id: int, timeout: float = 5.0):
         start_time = time.monotonic()
         while time.monotonic() - start_time < timeout:
-            if msg_id in self.responses:
-                return self.responses.pop(msg_id)
+            with self._response_lock:
+                if msg_id in self.responses:
+                    return self.responses.pop(msg_id)
             time.sleep(0.01)
         raise TimeoutError(f"No response for message {msg_id} after {timeout}s")
 
@@ -80,7 +89,7 @@ class LspEngine:
         log("Waiting for 'initialize' response...")
         initialized = False
         start_time = time.monotonic()
-        while not initialized and time.monotonic() - start_time < 5:
+        while not initialized and time.monotonic() - start_time < 10.0:
             self._read_and_process()
             if self.lsp_client.state == lsp.ClientState.NORMAL:
                 initialized = True
@@ -94,7 +103,8 @@ class LspEngine:
     def handle_event(self, event):
         if isinstance(event, lsp.PublishDiagnostics):
             uri = event.uri
-            self.diagnostics[uri] = event.diagnostics
+            with self._diagnostics_lock:
+                self.diagnostics[uri] = event.diagnostics
             log(f"Received {len(event.diagnostics)} diagnostics for {uri}")
             for diag in event.diagnostics:
                 log(f"  - L{diag.range.start.line+1}: {diag.message}")
@@ -104,6 +114,8 @@ class LspEngine:
             pass
         elif isinstance(event, lsp.ResponseError):
             log(f"[Server error] {event.message} (code: {event.code})")
+        elif type(event).__name__ == "Initialized":
+            pass
         elif isinstance(event, lsp.WorkspaceFolders):
             event.reply(
                 [
@@ -132,7 +144,8 @@ class LspEngine:
         ):
             pass
         elif isinstance(event, lsp.MethodResponse) and event.message_id is not None:
-            self.responses[event.message_id] = event
+            with self._response_lock:
+                self.responses[event.message_id] = event
             log(f"Stored response for message_id {event.message_id}")
         else:
             log(f"Unhandled event of type {type(event).__name__}")
