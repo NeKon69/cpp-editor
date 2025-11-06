@@ -336,3 +336,30 @@ class LspSession:
             uri = self._resolve_uri(file_path)
             return {uri: self.engine.diagnostics.get(uri, [])}
         return dict(self.engine.diagnostics)
+
+    def get_code_actions(self, file_path: str, line: int, character: int):
+        uri = self._resolve_uri(file_path)
+        if not self._check_file_open(uri, file_path):
+            return None
+
+        try:
+            msg_id = self.engine.lsp_client.sendRequest(
+                method="textDocument/codeAction",
+                params={
+                    "textDocument": {"uri": uri},
+                    "range": {
+                        "start": {"line": line, "character": character},
+                        "end": {"line": line, "character": character},
+                    },
+                    "context": {"diagnostics": []},
+                },
+            )
+            response = self._send_lsp_request(msg_id, timeout=2.0)
+
+            if response and hasattr(response, "result") and response.result:
+                return response.result
+
+            return None
+        except Exception as e:
+            log(f"lsp: error getting code actions: {e}")
+            return None

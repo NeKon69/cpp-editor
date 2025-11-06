@@ -35,6 +35,7 @@ class CodeEditor(QPlainTextEdit):
     cursor_position_changed = pyqtSignal(int, int)
     completion_requested = pyqtSignal(int, int)
     quick_fix_requested = pyqtSignal(int, int)
+    format_requested = pyqtSignal()
 
     def __init__(
         self, config: Optional[EditorConfig] = None, parent: Optional[QWidget] = None
@@ -43,9 +44,14 @@ class CodeEditor(QPlainTextEdit):
 
         self._config = config or EditorConfig()
         self._file_path: Optional[Path] = None
+        self._project_path: Optional[Path] = None
         self._line_number_area = LineNumberArea(self)
         self._highlighter: Optional[PygmentsHighlighter] = None
         self._diagnostics: List[Dict[str, Any]] = []
+        self._auto_format_enabled = True
+        self._skip_next_closing = False
+
+        self._pairs = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'"}
 
         self._setup_editor()
         self._setup_signals()
@@ -82,7 +88,80 @@ class CodeEditor(QPlainTextEdit):
             self.document(), "cpp", self._config.style_name
         )
 
+    def _get_indent_from_line(self, text: str) -> str:
+        indent = len(text) - len(text.lstrip())
+        return text[:indent]
+
+    def _should_auto_close(self, cursor: QTextCursor, char: str) -> bool:
+        pos = cursor.positionInBlock()
+        block = cursor.block()
+        block_text = block.text()
+
+        if pos < len(block_text):
+            next_char = block_text[pos]
+            if next_char not in (" ", "\t", "", "\n"):
+                return False
+
+        return True
+
+    def _find_clang_format_config(self) -> Optional[Path]:
+        if not self._project_path:
+            return None
+
+        config_path = self._project_path / ".clang-format"
+        if config_path.exists():
+            return config_path
+
+        return None
+
     def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key.Key_Return:
+            cursor = self.textCursor()
+            block = cursor.block()
+            block_text = block.text()
+
+            indent = self._get_indent_from_line(block_text)
+
+            if block_text.rstrip().endswith(("{", ":")):
+                indent += "\t"
+
+            super().keyPressEvent(event)
+
+            cursor = self.textCursor()
+            cursor.insertText(indent)
+            self.setTextCursor(cursor)
+
+            return
+
+        if event.text() in self._pairs:
+            char = event.text()
+            cursor = self.textCursor()
+
+            if self._should_auto_close(cursor, char):
+                super().keyPressEvent(event)
+
+                closing = self._pairs[char]
+                cursor = self.textCursor()
+                cursor.insertText(closing)
+                cursor.movePosition(QTextCursor.MoveOperation.Left)
+                self.setTextCursor(cursor)
+                self._skip_next_closing = True
+                return
+
+        if event.text() in self._pairs.values():
+            cursor = self.textCursor()
+            block = cursor.block()
+            block_text = block.text()
+            pos = cursor.positionInBlock()
+
+            if self._skip_next_closing and pos < len(block_text):
+                if block_text[pos] == event.text():
+                    super().keyPressEvent(event)
+                    self._skip_next_closing = False
+                    return
+
+            self._skip_next_closing = False
+
         if (
             event.modifiers() == Qt.KeyboardModifier.ControlModifier
             and event.key() == Qt.Key.Key_Space
@@ -101,6 +180,14 @@ class CodeEditor(QPlainTextEdit):
             line = cursor.blockNumber()
             character = cursor.columnNumber()
             self.quick_fix_requested.emit(line, character)
+            return
+
+        if (
+            event.modifiers()
+            == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+            and event.key() == Qt.Key.Key_F
+        ):
+            self.format_requested.emit()
             return
 
         if event.key() == Qt.Key.Key_AsciiTilde:
@@ -251,6 +338,53 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
         self._line_number_area.update()
 
+    def apply_text_edits(self, edits: List[Dict[str, Any]]):
+        if not edits:
+            return
+
+        old_cursor = self.textCursor()
+        old_block = old_cursor.blockNumber()
+        old_pos_in_block = old_cursor.positionInBlock()
+
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+
+        for edit in sorted(
+            edits, key=lambda e: (e["line"], e["character"]), reverse=True
+        ):
+            start_line = edit["line"]
+            start_char = edit["character"]
+            end_line = edit.get("end_line", start_line)
+            end_char = edit.get("end_character", start_char)
+            new_text = edit.get("new_text", "")
+
+            start_block = self.document().findBlockByNumber(start_line)
+            if not start_block.isValid():
+                continue
+
+            start_pos = start_block.position() + start_char
+
+            end_block = self.document().findBlockByNumber(end_line)
+            if not end_block.isValid():
+                continue
+
+            end_pos = end_block.position() + end_char
+
+            cursor.setPosition(start_pos)
+            cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(new_text)
+
+        cursor.endEditBlock()
+
+        new_cursor = self.textCursor()
+        new_block = self.document().findBlockByNumber(old_block)
+        if new_block.isValid():
+            new_pos = new_block.position() + min(
+                old_pos_in_block, len(new_block.text())
+            )
+            new_cursor.setPosition(new_pos)
+        self.setTextCursor(new_cursor)
+
     def goto_position(self, line: int, character: int):
         cursor = QTextCursor(self.document().findBlockByNumber(line))
         cursor.movePosition(
@@ -270,11 +404,20 @@ class CodeEditor(QPlainTextEdit):
         if self._highlighter:
             self._highlighter.set_style(style_name)
 
+    def set_auto_format_enabled(self, enabled: bool):
+        self._auto_format_enabled = enabled
+
     def set_file_path(self, path: Path):
         self._file_path = path
 
+    def set_project_path(self, path: Path):
+        self._project_path = path
+
     def get_file_path(self) -> Optional[Path]:
         return self._file_path
+
+    def get_clang_format_config(self) -> Optional[Path]:
+        return self._find_clang_format_config()
 
     def load_file(self, path: Path) -> bool:
         try:

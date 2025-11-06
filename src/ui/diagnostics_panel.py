@@ -1,13 +1,22 @@
 from typing import List, Dict, Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QListWidget,
+    QListWidgetItem,
+    QLabel,
+    QMenu,
+)
+from PyQt6.QtGui import QColor
 
 from src.common.vars import log
 
 
 class DiagnosticsPanel(QWidget):
     diagnostic_clicked = pyqtSignal(int, int)
+    apply_fix_requested = pyqtSignal(int, int, str)
 
     def __init__(self):
         super().__init__()
@@ -37,6 +46,8 @@ class DiagnosticsPanel(QWidget):
         """
         )
         self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
 
         layout.addWidget(self._header)
         layout.addWidget(self._list)
@@ -53,12 +64,17 @@ class DiagnosticsPanel(QWidget):
             line = diag["line"] + 1
             severity = diag.get("severity", 1)
             message = diag["message"]
+            has_fix = "(fix available)" in message
 
             icon = "❌" if severity == 1 else "⚠️"
-            text = f"{icon} Line {line}: {message}"
+            fix_indicator = " 🔧" if has_fix else ""
+            text = f"{icon} Line {line}: {message}{fix_indicator}"
 
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, (diag["line"], diag["character"]))
+
+            if has_fix:
+                item.setForeground(QColor("#a6e22e"))
 
             self._list.addItem(item)
 
@@ -67,3 +83,26 @@ class DiagnosticsPanel(QWidget):
         if data:
             line, character = data
             self.diagnostic_clicked.emit(line, character)
+
+    def _on_context_menu(self, position):
+        item = self._list.itemAt(position)
+        if not item:
+            return
+
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        line, character = data
+        message = item.text()
+
+        if "(fix available)" not in message:
+            return
+
+        menu = QMenu(self)
+        fix_action = menu.addAction("Apply Fix")
+        fix_action.triggered.connect(
+            lambda: self.apply_fix_requested.emit(line, character, message)
+        )
+
+        menu.exec(self._list.mapToGlobal(position))

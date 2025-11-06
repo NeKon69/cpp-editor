@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QDir, pyqtSignal
-from PyQt6.QtWidgets import QTreeView
+from PyQt6.QtWidgets import QTreeView, QFileDialog
 from PyQt6.QtGui import QFileSystemModel
 
 from src.common.vars import log
@@ -10,6 +10,7 @@ from src.common.vars import log
 
 class FileTree(QTreeView):
     file_selected = pyqtSignal(Path)
+    root_changed = pyqtSignal(Path)
 
     def __init__(self, root_path: Optional[Path] = None):
         super().__init__()
@@ -33,11 +34,13 @@ class FileTree(QTreeView):
         self.setIndentation(20)
         self.setSortingEnabled(True)
         self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         for i in range(1, 4):
             self.hideColumn(i)
 
         self.clicked.connect(self._on_file_clicked)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
         if self._root_path:
             self.set_root_path(self._root_path)
@@ -49,9 +52,22 @@ class FileTree(QTreeView):
             self.setRootIndex(index)
 
             log(f"file tree root set to: {path}")
+            self.root_changed.emit(path)
 
         except Exception as e:
             log(f"failed to set root path {path}: {e}")
+
+    def change_root_directory(self):
+        try:
+            directory = QFileDialog.getExistingDirectory(
+                self, "Select Project Root", str(self._root_path or Path.home())
+            )
+
+            if directory:
+                self.set_root_path(Path(directory))
+
+        except Exception as e:
+            log(f"failed to change root directory: {e}")
 
     def _on_file_clicked(self, index):
         try:
@@ -65,3 +81,12 @@ class FileTree(QTreeView):
 
         except Exception as e:
             log(f"failed to handle file click: {e}")
+
+    def _on_context_menu(self, position):
+        from PyQt6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        change_root_action = menu.addAction("Change Root Directory")
+        change_root_action.triggered.connect(self.change_root_directory)
+
+        menu.exec(self.mapToGlobal(position))

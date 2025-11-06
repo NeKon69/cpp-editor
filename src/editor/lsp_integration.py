@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, List, Any
 import hashlib
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -11,6 +11,7 @@ class LspIntegration(QObject):
     diagnostics_updated = pyqtSignal(list)
     completion_ready = pyqtSignal(list)
     hover_ready = pyqtSignal(str)
+    code_actions_ready = pyqtSignal(list)
 
     def __init__(self, session: LspSession):
         super().__init__()
@@ -215,3 +216,71 @@ class LspIntegration(QObject):
 
         finally:
             self._processing = False
+
+    def request_code_actions(
+        self, path: Path, line: int, character: int, message: str = None
+    ):
+        try:
+            code_actions = self._session.get_code_actions(str(path), line, character)
+            if code_actions and len(code_actions) > 0:
+                action = code_actions[0]
+                if hasattr(action, "edit") and action.edit:
+                    changes = action.edit.get("changes", {})
+                    for uri, edits in changes.items():
+                        edits_list = []
+                        for edit in edits:
+                            edits_list.append(
+                                {
+                                    "line": edit["range"]["start"]["line"],
+                                    "character": edit["range"]["start"]["character"],
+                                    "end_line": edit["range"]["end"]["line"],
+                                    "end_character": edit["range"]["end"]["character"],
+                                    "new_text": edit.get("newText", ""),
+                                }
+                            )
+                        self.code_actions_ready.emit(edits_list)
+                else:
+                    log(f"lsp: code action has no edit")
+            else:
+                log(f"lsp: no code actions available at {line}:{character}")
+
+        except Exception as e:
+            log(f"lsp: failed to request code actions: {e}")
+
+    def format_document_in_memory(self, path: Path) -> Optional[List[Dict[str, Any]]]:
+        try:
+            import sansio_lsp_client as lsp
+
+            uri = path.as_uri()
+            msg_id = self._session.engine.lsp_client.formatting(
+                text_document=lsp.TextDocumentIdentifier(uri=uri),
+                options=lsp.FormattingOptions(tabSize=4, insertSpaces=True),
+            )
+            self._session.tick()
+
+            response = self._session.engine.wait_for_response(msg_id, timeout=2.0)
+
+            if (
+                response
+                and isinstance(response, lsp.DocumentFormatting)
+                and response.result
+            ):
+                edits = []
+                for edit in response.result:
+                    new_text = getattr(edit, "newText", getattr(edit, "new_text", ""))
+                    edits.append(
+                        {
+                            "line": edit.range.start.line,
+                            "character": edit.range.start.character,
+                            "end_line": edit.range.end.line,
+                            "end_character": edit.range.end.character,
+                            "new_text": new_text,
+                        }
+                    )
+                return edits
+
+            return None
+
+        except Exception as e:
+            log(f"lsp: failed to format in memory: {e}")
+            return None

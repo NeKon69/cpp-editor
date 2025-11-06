@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
 
         self._project_path = project_path
         self._current_file: Optional[Path] = None
-        self._editor_config = EditorConfig()
+        self._editor_config = EditorConfig.load()
 
         self._setup_window()
         self._setup_lsp()
@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         v_splitter.setHandleWidth(1)
 
         self._editor = CodeEditor(self._editor_config)
+        self._editor.set_project_path(self._project_path)
 
         self._diagnostics_panel = DiagnosticsPanel()
         self._diagnostics_panel.diagnostic_clicked.connect(self._on_diagnostic_clicked)
@@ -102,7 +103,12 @@ class MainWindow(QMainWindow):
 
         file_menu = menubar.addMenu("File")
 
-        open_action = QAction("Open", self)
+        open_project_action = QAction("Open Project", self)
+        open_project_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        open_project_action.triggered.connect(self._open_project)
+        file_menu.addAction(open_project_action)
+
+        open_action = QAction("Open File", self)
         open_action.setShortcut(QKeySequence("Ctrl+O"))
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
@@ -122,7 +128,7 @@ class MainWindow(QMainWindow):
         edit_menu = menubar.addMenu("Edit")
 
         format_action = QAction("Format Document", self)
-        format_action.setShortcut(QKeySequence("Ctrl+Alt+L"))
+        format_action.setShortcut(QKeySequence("Ctrl+Alt+F"))
         format_action.triggered.connect(self._format_document)
         edit_menu.addAction(format_action)
 
@@ -132,6 +138,10 @@ class MainWindow(QMainWindow):
         toggle_diag_action.setShortcut(QKeySequence("Ctrl+D"))
         toggle_diag_action.triggered.connect(self._toggle_diagnostics_panel)
         view_menu.addAction(toggle_diag_action)
+
+        theme_action = QAction("Syntax Highlighting Colors", self)
+        theme_action.triggered.connect(self._open_theme_picker)
+        view_menu.addAction(theme_action)
 
         git_menu = menubar.addMenu("Git")
 
@@ -147,6 +157,7 @@ class MainWindow(QMainWindow):
         self._editor.cursor_position_changed.connect(self._on_cursor_changed)
         self._editor.completion_requested.connect(self._on_completion_requested)
         self._editor.quick_fix_requested.connect(self._on_quick_fix_requested)
+        self._editor.format_requested.connect(self._format_document)
 
         self._lsp_integration.completion_ready.connect(self._on_completion_ready)
         self._lsp_integration.hover_ready.connect(self._on_hover_ready)
@@ -223,12 +234,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, int)
     def _on_quick_fix_requested(self, line: int, character: int):
-        if self._current_file:
-            supported_extensions = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
-            if self._current_file.suffix.lower() in supported_extensions:
-                QMessageBox.information(
-                    self, "Quick Fix", "Code actions not yet fully supported"
-                )
+        pass
 
     @pyqtSlot(list)
     def _on_completion_ready(self, completions: list):
@@ -240,21 +246,10 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(list)
     def _on_diagnostics_updated(self, diagnostics: list):
-        print(
-            f"[MainWindow._on_diagnostics_updated] Received {len(diagnostics)} diagnostics"
-        )
-
-        for i, d in enumerate(diagnostics):
-            print(f"  [{i}] L{d['line']+1}: {d['message']}")
-
         if self._current_file:
-            print(
-                f"[MainWindow._on_diagnostics_updated] Current file: {self._current_file}"
-            )
             self._editor.update_diagnostics(diagnostics)
             self._diagnostics_panel.update_diagnostics(diagnostics)
         else:
-            print(f"[MainWindow._on_diagnostics_updated] No current file!")
             self._diagnostics_panel.update_diagnostics([])
 
     @pyqtSlot(int, int)
@@ -273,6 +268,24 @@ class MainWindow(QMainWindow):
         except Exception as e:
             pass
 
+    def _open_project(self):
+        try:
+            directory = QFileDialog.getExistingDirectory(
+                self, "Select Project Directory", str(self._project_path)
+            )
+
+            if directory:
+                self._project_path = Path(directory)
+                self._file_tree.set_root_path(self._project_path)
+                self._editor.set_project_path(self._project_path)
+                self.setWindowTitle(f"C++ Editor - {self._project_path.name}")
+                self._statusbar.showMessage(
+                    f"Project changed to: {self._project_path.name}"
+                )
+
+        except Exception as e:
+            log(f"failed to change project: {e}")
+
     def _open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open File", str(self._project_path), "All Files (*)"
@@ -289,15 +302,32 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(f"Saved: {self._current_file.name}")
 
     def _format_document(self):
-        if self._current_file:
-            supported_extensions = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
-            if self._current_file.suffix.lower() in supported_extensions:
-                self._lsp_integration.format_document(self._current_file)
-                self._statusbar.showMessage("Formatting...")
-            else:
-                self._statusbar.showMessage(
-                    "Formatting not supported for this file type"
-                )
+        if not self._current_file:
+            return
+
+        supported_extensions = {".cpp", ".h", ".hpp", ".c", ".cc", ".cxx", ".hxx"}
+        if self._current_file.suffix.lower() not in supported_extensions:
+            return
+
+        edits = self._lsp_integration.format_document_in_memory(self._current_file)
+
+        if edits:
+            self._editor.apply_text_edits(edits)
+            self._statusbar.showMessage("Formatted")
+
+    def _open_theme_picker(self):
+        try:
+            from src.ui.theme_picker import ThemePicker
+
+            picker = ThemePicker(self._editor_config.colors, self)
+            if picker.exec():
+                new_colors = picker.get_colors()
+                self._editor_config.colors = new_colors
+                self._editor_config.save()
+                self._editor.set_colors(new_colors)
+
+        except Exception as e:
+            log(f"failed to open theme picker: {e}")
 
     def _open_git(self):
         try:
