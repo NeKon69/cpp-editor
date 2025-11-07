@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
-from PyQt6.QtGui import QAction, QKeySequence, QColor
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -11,18 +11,21 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QStatusBar,
     QMenuBar,
-    QColorDialog,
-    QMessageBox,
 )
 
 from src.common.vars import log
+from src.common.process_runner import ProcessRunner
 from src.configs.editor_config import EditorConfig
+from src.configs.build_config import BuildConfig
 from src.editor.editor_widget import CodeEditor
 from src.editor.lsp_integration import LspIntegration
 from src.editor.completer import LspCompleter
+from src.editor.cmake_helper import CMakeHelper
 from src.lsp_server.session import LspSession
 from src.ui.file_tree import FileTree
 from src.ui.diagnostics_panel import DiagnosticsPanel
+from src.ui.terminal_widget import TerminalWidget
+from src.ui.build_settings import BuildSettings
 from src.utils.git_helper import GitHelper
 
 
@@ -33,6 +36,8 @@ class MainWindow(QMainWindow):
         self._project_path = project_path
         self._current_file: Optional[Path] = None
         self._editor_config = EditorConfig.load()
+        self._build_config = BuildConfig.load()
+        self._process_runner: Optional[ProcessRunner] = None
 
         self._setup_window()
         self._setup_lsp()
@@ -67,6 +72,9 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.setHandleWidth(1)
+
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
         h_splitter.setHandleWidth(1)
 
@@ -96,7 +104,17 @@ class MainWindow(QMainWindow):
         h_splitter.setStretchFactor(1, 1)
         h_splitter.setSizes([250, 1350])
 
-        main_layout.addWidget(h_splitter)
+        self._terminal = TerminalWidget()
+        self._terminal.setMaximumHeight(150)
+        self._terminal.hide()
+
+        main_splitter.addWidget(h_splitter)
+        main_splitter.addWidget(self._terminal)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 0)
+        main_splitter.setSizes([700, 0])
+
+        main_layout.addWidget(main_splitter)
 
     def _setup_menubar(self):
         menubar = self.menuBar()
@@ -139,9 +157,30 @@ class MainWindow(QMainWindow):
         toggle_diag_action.triggered.connect(self._toggle_diagnostics_panel)
         view_menu.addAction(toggle_diag_action)
 
+        toggle_terminal_action = QAction("Toggle Terminal", self)
+        toggle_terminal_action.setShortcut(QKeySequence("Ctrl+`"))
+        toggle_terminal_action.triggered.connect(self._toggle_terminal)
+        view_menu.addAction(toggle_terminal_action)
+
         theme_action = QAction("Syntax Highlighting Colors", self)
         theme_action.triggered.connect(self._open_theme_picker)
         view_menu.addAction(theme_action)
+
+        build_menu = menubar.addMenu("Build")
+
+        build_settings_action = QAction("Build Settings", self)
+        build_settings_action.triggered.connect(self._open_build_settings)
+        build_menu.addAction(build_settings_action)
+
+        build_action = QAction("Build", self)
+        build_action.setShortcut(QKeySequence("Ctrl+B"))
+        build_action.triggered.connect(self._build_project)
+        build_menu.addAction(build_action)
+
+        run_action = QAction("Run", self)
+        run_action.setShortcut(QKeySequence("Ctrl+R"))
+        run_action.triggered.connect(self._run_project)
+        build_menu.addAction(run_action)
 
         git_menu = menubar.addMenu("Git")
 
@@ -262,6 +301,12 @@ class MainWindow(QMainWindow):
         else:
             self._diagnostics_panel.show()
 
+    def _toggle_terminal(self):
+        if self._terminal.isVisible():
+            self._terminal.hide()
+        else:
+            self._terminal.show()
+
     def _process_lsp_events(self):
         try:
             self._lsp_integration.process_events()
@@ -329,6 +374,99 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log(f"failed to open theme picker: {e}")
 
+    def _open_build_settings(self):
+        try:
+            settings_dialog = BuildSettings(self._build_config, self)
+            if settings_dialog.exec():
+                self._build_config = settings_dialog.get_config()
+                self._statusbar.showMessage(
+                    f"Build config: {self._build_config.config_mode}"
+                )
+
+        except Exception as e:
+            log(f"failed to open build settings: {e}")
+
+    def _build_project(self):
+        if self._process_runner and self._process_runner.isRunning():
+            self._statusbar.showMessage("Build already running")
+            return
+
+        self._terminal.show()
+        self._terminal.clear()
+        self._terminal.set_title("Build Output")
+
+        build_cmd = self._build_config.build_command
+
+        if self._build_config.config_mode == "cmake":
+            try:
+                cmake_helper = CMakeHelper(
+                    self._project_path, self._build_config.compiler
+                )
+                generator = cmake_helper.get_cmake_generator()
+                cxx_compiler = cmake_helper.get_cmake_cxx_compiler()
+
+                build_cmd = f'cmake -B build -G"{generator}" -DCMAKE_CXX_COMPILER={cxx_compiler} && cmake --build build'
+            except Exception as e:
+                self._terminal.append_text(f"Error: {str(e)}", error=True)
+                return
+
+        self._process_runner = ProcessRunner(build_cmd, self._project_path)
+        self._process_runner.output.connect(self._on_process_output)
+        self._process_runner.error.connect(self._on_process_error)
+        self._process_runner.finished.connect(self._on_process_finished)
+
+        self._process_runner.start()
+        self._statusbar.showMessage("Building...")
+
+    def _run_project(self):
+        if self._process_runner and self._process_runner.isRunning():
+            self._statusbar.showMessage("Process already running")
+            return
+
+        self._terminal.show()
+        self._terminal.clear()
+        self._terminal.set_title("Run Output")
+
+        self._process_runner = ProcessRunner(
+            self._build_config.run_command, self._project_path
+        )
+
+        self._process_runner.output.connect(self._on_process_output)
+        self._process_runner.error.connect(self._on_process_error)
+        self._process_runner.finished.connect(self._on_process_finished)
+
+        self._process_runner.start()
+        self._statusbar.showMessage("Running...")
+
+    @pyqtSlot(str)
+    def _on_process_output(self, text: str):
+        try:
+            if text.strip():
+                self._terminal.append_text(text.rstrip())
+        except Exception as e:
+            log(f"error in process output: {e}")
+
+    @pyqtSlot(str)
+    def _on_process_error(self, error: str):
+        try:
+            self._terminal.append_text(error, error=True)
+        except Exception as e:
+            log(f"error in process error: {e}")
+
+    @pyqtSlot(int)
+    def _on_process_finished(self, exit_code: int):
+        try:
+            if exit_code == 0:
+                self._statusbar.showMessage("Finished successfully")
+                self._terminal.append_text("\n✓ Process finished successfully")
+            else:
+                self._statusbar.showMessage(f"Failed with exit code {exit_code}")
+                self._terminal.append_text(
+                    f"\n✗ Process failed with exit code {exit_code}", error=True
+                )
+        except Exception as e:
+            log(f"error in process finished: {e}")
+
     def _open_git(self):
         try:
             GitHelper.open_lazygit(self._project_path)
@@ -337,6 +475,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            if self._process_runner and self._process_runner.isRunning():
+                self._process_runner.stop()
+
             if self._current_file:
                 supported_extensions = {
                     ".cpp",
