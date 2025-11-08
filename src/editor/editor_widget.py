@@ -1,36 +1,41 @@
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from PyQt6.QtCore import Qt, QRect, QSize, pyqtSignal, QTimer
-from PyQt6.QtGui import (
-    QColor,
-    QPainter,
-    QTextFormat,
-    QFont,
-    QTextCursor,
-    QKeyEvent,
-    QTextCharFormat,
+from PyQt6.QtCore import (
+    Qt,
+    QTimer,
+    pyqtSignal,
+    QRect,
 )
-from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit, QToolTip
+from PyQt6.QtGui import (
+    QFont,
+    QKeyEvent,
+    QTextCursor,
+    QTextCharFormat,
+    QColor,
+    QTextFormat,
+    QPainter,
+)
+from PyQt6.QtWidgets import (
+    QPlainTextEdit,
+    QWidget,
+    QToolTip,
+    QTextEdit,
+)
 
-from src.common.vars import log
+from src.configs.editor_config import EditorColors
 from src.editor.smart_highlighter import SmartHighlighter
-from src.configs.editor_config import EditorConfig, EditorColors
 
 
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self._editor = editor
-        log("line_number_area: initialized")
 
-    def sizeHint(self) -> QSize:
-        size = QSize(self._editor._line_number_area_width(), 0)
-        log(f"line_number_area: sizeHint called, returning width={size.width()}")
-        return size
+    def sizeHint(self):
+        return QSize(self._editor._line_number_area_width(), 0)
 
     def paintEvent(self, event):
-        log(f"line_number_area: paintEvent triggered")
         self._editor._paint_line_numbers(event)
 
 
@@ -102,6 +107,7 @@ class CodeEditor(QPlainTextEdit):
     def _setup_highlighter(self):
         if self._project_path and not self._highlighter:
             self._highlighter = SmartHighlighter(self.document(), self._project_path)
+            self._highlighter.update_colors(self._config.colors)
 
     def _get_indent_from_line(self, text: str) -> str:
         indent = len(text) - len(text.lstrip())
@@ -413,19 +419,13 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
         self._line_number_area.update()
 
-    def set_auto_format_enabled(self, enabled: bool):
-        self._auto_format_enabled = enabled
-
-    def set_file_path(self, path: Path):
-        self._file_path = path
+        if self._highlighter:
+            self._highlighter.update_colors(colors)
 
     def set_project_path(self, path: Path):
         self._project_path = path
         if not self._highlighter:
             self._setup_highlighter()
-
-    def get_file_path(self) -> Optional[Path]:
-        return self._file_path
 
     def load_file(self, path: Path) -> bool:
         try:
@@ -434,12 +434,12 @@ class CodeEditor(QPlainTextEdit):
 
             self._light_highlight_timer.stop()
             self._heavy_highlight_timer.stop()
+            self._last_highlighted_content = content
 
             self.setPlainText(content)
             self._file_path = path
             self._diagnostics = []
             self._last_edited_line_with_hash = -1
-            self._last_highlighted_content = content
 
             if self._highlighter and self._file_path:
                 self._highlighter.preprocess_file(self._file_path, "file_open")
@@ -453,12 +453,9 @@ class CodeEditor(QPlainTextEdit):
         try:
             if not save_path:
                 return False
-
             with open(save_path, "w", encoding="utf-8") as f:
                 f.write(self.toPlainText())
-
             self._file_path = save_path
-
             return True
-        except Exception as e:
+        except Exception:
             return False

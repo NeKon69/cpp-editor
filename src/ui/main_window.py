@@ -37,7 +37,8 @@ class MainWindow(QMainWindow):
         self._current_file: Optional[Path] = None
         self._editor_config = EditorConfig.load()
         self._build_helper = BuildHelper(project_path)
-        self._process_runner: Optional[ProcessRunner] = None
+
+        self._theme_picker = None
 
         self._setup_window()
         self._setup_lsp()
@@ -88,6 +89,7 @@ class MainWindow(QMainWindow):
 
         self._editor = CodeEditor(self._editor_config)
         self._editor.set_project_path(self._project_path)
+        self._editor.set_colors(self._editor_config.colors)
 
         self._diagnostics_panel = DiagnosticsPanel()
         self._diagnostics_panel.diagnostic_clicked.connect(self._on_diagnostic_clicked)
@@ -361,18 +363,20 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("Formatted")
 
     def _open_theme_picker(self):
-        try:
-            from src.ui.theme_picker import ThemePicker
+        from src.ui.theme_picker import ThemePicker
 
-            picker = ThemePicker(self._editor_config.colors, self)
-            if picker.exec():
-                new_colors = picker.get_colors()
-                self._editor_config.colors = new_colors
-                self._editor_config.save()
-                self._editor.set_colors(new_colors)
+        if not self._theme_picker:
+            self._theme_picker = ThemePicker(self._editor_config.colors, self)
+            self._theme_picker.colors_changed.connect(self._on_colors_changed)
+        self._theme_picker._theme_combo.setCurrentText(
+            self._editor_config.colors.to_dict().get("name", "")
+        )
+        self._theme_picker.show()
 
-        except Exception as e:
-            log(f"failed to open theme picker: {e}")
+    def _on_colors_changed(self, colors):
+        self._editor_config.colors = colors
+        self._editor_config.save()
+        self._editor.set_colors(colors)
 
     def _open_build_settings(self):
         try:

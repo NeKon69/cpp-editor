@@ -26,7 +26,8 @@ class CppPreprocessor:
         )
 
     def preprocess(
-        self, file_path: Path, save_result: bool = True
+        self,
+        file_path: Path,
     ) -> Optional[PreprocessingResult]:
         log(
             f"preprocessor: ========== STARTING PREPROCESS FOR {file_path.name} =========="
@@ -110,9 +111,6 @@ class CppPreprocessor:
             self._directive_hashes[str(file_path)] = directive_hash
             log(f"preprocessor: result cached")
 
-            if save_result:
-                self._save_preprocessed_file(file_path, final_content)
-
             log("preprocessor: ========== PREPROCESS COMPLETE ==========")
             return result
 
@@ -133,17 +131,6 @@ class CppPreprocessor:
         h = hashlib.md5(directive_string.encode("utf-8")).hexdigest()
         log(f"preprocessor: directive hash: {h}")
         return h
-
-    def _save_preprocessed_file(self, original_path: Path, content: str):
-        log("preprocessor: saving preprocessed file")
-        try:
-            output_name = f"{original_path.stem}_preprocessed{original_path.suffix}"
-            output_path = original_path.parent / output_name
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            log(f"preprocessor: saved to {output_path}")
-        except Exception as e:
-            log(f"preprocessor: ERROR saving preprocessed file: {e}")
 
     def _run_preprocessor(self, file_path: Path) -> Optional[str]:
         log(f"preprocessor: running external preprocessor (compiler={self.compiler})")

@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
+import qdarkstyle
 
 from src.ui.main_window import MainWindow
 from src.common.vars import log
@@ -15,6 +16,7 @@ def main():
         return
 
     app = QApplication(sys.argv)
+    app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api="pyqt5"))
 
     window = MainWindow(project_path)
     window.show()

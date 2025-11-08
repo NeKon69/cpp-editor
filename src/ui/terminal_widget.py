@@ -1,8 +1,9 @@
 import platform
 import os
+import re
 import signal
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QProcess, QProcessEnvironment
-from PyQt6.QtGui import QFont, QTextCursor, QKeyEvent, QColor
+from PyQt6.QtGui import QFont, QTextCursor, QColor
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -15,6 +16,8 @@ from PyQt6.QtWidgets import (
 
 from src.common.vars import log
 
+MAX_BUFFER_SIZE = 5000
+
 
 class TerminalWidget(QWidget):
     def __init__(self, parent=None):
@@ -22,6 +25,11 @@ class TerminalWidget(QWidget):
         self._process = None
         self._working_dir = None
         self._setup_ui()
+        self._shell = (
+            ("powershell.exe", ["-Command"])
+            if platform.system().lower() == "windows"
+            else ("/bin/bash", ["-c"])
+        )
 
     def _setup_ui(self):
         layout = QVBoxLayout()
@@ -87,12 +95,11 @@ class TerminalWidget(QWidget):
         self._working_dir = str(path)
 
     def _on_return_pressed(self):
-        command = self._input_line.text().strip()
-        if not command:
+        cmd = self._input_line.text().strip()
+        if not cmd:
             return
-
         self._input_line.clear()
-        self.execute_command(command)
+        self.execute_command(cmd)
 
     def _stop_process(self):
         if self._process and self._process.state() == QProcess.ProcessState.Running:
@@ -113,6 +120,12 @@ class TerminalWidget(QWidget):
             self._text_edit.setTextColor(QColor("#d4d4d4"))
         self._text_edit.insertPlainText(text + "\n")
         self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+
+        buf = self._text_edit.toPlainText()
+        if len(buf) > MAX_BUFFER_SIZE:
+            trim = len(buf) - MAX_BUFFER_SIZE
+            self._text_edit.setPlainText(buf[trim:])
+            self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
 
     def execute_command(self, command: str):
         if self._process and self._process.state() == QProcess.ProcessState.Running:
@@ -135,11 +148,8 @@ class TerminalWidget(QWidget):
         env.insert("NO_COLOR", "1")
         self._process.setProcessEnvironment(env)
 
-        system = platform.system().lower()
-        if system == "windows":
-            self._process.start("powershell.exe", ["-Command", command])
-        else:
-            self._process.start("/bin/bash", ["-c", command])
+        shell_cmd, shell_args = self._shell
+        self._process.start(shell_cmd, shell_args + [command])
 
     @pyqtSlot()
     def _handle_stdout(self):

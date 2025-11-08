@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Dict, Optional, List
 from datetime import datetime
+import re
+import traceback
 
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument, QTextCharFormat, QColor
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
@@ -10,7 +12,6 @@ from src.common.vars import log
 
 from tree_sitter import Language, Parser, Query, QueryCursor, Tree, Node
 import tree_sitter_cpp
-import traceback
 
 
 def timestamp():
@@ -20,7 +21,7 @@ def timestamp():
 class PreprocessWorker(QObject):
     finished = pyqtSignal(str, int, int)
 
-    def __init__(self, preprocessor, file_path):
+    def __init__(self, preprocessor, file_path: Path):
         super().__init__()
         self.preprocessor = preprocessor
         self.file_path = file_path
@@ -367,23 +368,12 @@ class SmartHighlighter(QSyntaxHighlighter):
         self._build_formats()
 
     def _build_formats(self):
+        self._formats.clear()
         keyword_fmt = QTextCharFormat()
-
         keyword_fmt.setForeground(QColor("#D946EF"))
-
         keyword_fmt.setFontWeight(600)
-
         self._formats["keyword"] = keyword_fmt
-
-        keyword_auto_fmt = QTextCharFormat()
-        keyword_auto_fmt.setForeground(QColor("#D946EF"))
-        keyword_auto_fmt.setFontWeight(600)
-        self._formats["keyword.auto"] = keyword_auto_fmt
-
-        keyword_decltype_fmt = QTextCharFormat()
-        keyword_decltype_fmt.setForeground(QColor("#D946EF"))
-        keyword_decltype_fmt.setFontWeight(600)
-        self._formats["keyword.decltype"] = keyword_decltype_fmt
+        self._formats["keyword.auto"] = keyword_fmt
 
         type_primitive_fmt = QTextCharFormat()
         type_primitive_fmt.setForeground(QColor("#00F0FF"))
@@ -434,7 +424,6 @@ class SmartHighlighter(QSyntaxHighlighter):
 
         variable_builtin_fmt = QTextCharFormat()
         variable_builtin_fmt.setForeground(QColor("#D946EF"))
-
         self._formats["variable.builtin"] = variable_builtin_fmt
 
         operator_fmt = QTextCharFormat()
@@ -455,13 +444,19 @@ class SmartHighlighter(QSyntaxHighlighter):
         self._formats["comment"] = comment_fmt
 
         constant_builtin_fmt = QTextCharFormat()
-
         constant_builtin_fmt.setForeground(QColor("#BD93F9"))
         self._formats["constant.builtin"] = constant_builtin_fmt
 
         preproc_fmt = QTextCharFormat()
         preproc_fmt.setForeground(QColor("#FF79C6"))
         self._formats["preproc"] = preproc_fmt
+
+    def update_colors(self, colors):
+        self._build_formats()
+        for name, fmt in self._formats.items():
+            if hasattr(colors, name.replace(".", "_")):
+                fmt.setForeground(QColor(getattr(colors, name.replace(".", "_"))))
+        self.rehighlight()
 
     def preprocess_file(self, file_path: Path, reason: str = "unknown"):
         if self._is_preprocessing:
@@ -493,7 +488,6 @@ class SmartHighlighter(QSyntaxHighlighter):
         log(
             f"[{timestamp()}] PREPROCESS_DONE id={operation_id} lines={header_line_count}"
         )
-
         self._is_preprocessing = False
 
         if self._last_completed_operation > operation_id:
@@ -579,9 +573,7 @@ class SmartHighlighter(QSyntaxHighlighter):
             return
 
         self._operation_counter += 1
-
         operation_id = self._operation_counter
-
         log(f"[{timestamp()}] TRIGGER_LIGHT reason={reason} id={operation_id}")
 
         if self._original_line_start > 0 and self._preprocessed_header:
