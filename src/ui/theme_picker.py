@@ -1,4 +1,4 @@
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -9,6 +9,9 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QComboBox,
     QInputDialog,
+    QScrollArea,
+    QWidget,
+    QMessageBox,
 )
 from PyQt6.QtGui import QColor
 
@@ -26,8 +29,8 @@ class ThemePicker(QDialog):
         self._color_buttons = {}
         self._db = ColorDatabase()
 
-        self.setWindowTitle("Syntax Highlighting Colors")
-        self.setGeometry(100, 100, 600, 450)
+        self.setWindowTitle("Theme Editor")
+        self.setGeometry(100, 100, 700, 600)
 
         self._setup_ui()
 
@@ -39,49 +42,91 @@ class ThemePicker(QDialog):
         self._theme_combo = QComboBox()
         self._theme_combo.addItems(self._db.get_all_themes())
         self._theme_combo.currentTextChanged.connect(self._load_selected_theme)
-        theme_layout.addWidget(self._theme_combo)
+        theme_layout.addWidget(self._theme_combo, 1)
 
-        save_theme_button = QPushButton("Save Theme")
+        new_theme_button = QPushButton("New")
+        new_theme_button.clicked.connect(self._new_theme)
+        theme_layout.addWidget(new_theme_button)
+
+        save_theme_button = QPushButton("Save")
         save_theme_button.clicked.connect(self._save_theme)
         theme_layout.addWidget(save_theme_button)
 
-        delete_theme_button = QPushButton("Delete Theme")
+        delete_theme_button = QPushButton("Delete")
         delete_theme_button.clicked.connect(self._delete_theme)
         theme_layout.addWidget(delete_theme_button)
 
         layout.addLayout(theme_layout)
 
-        grid = QGridLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        grid = QGridLayout(scroll_widget)
 
         color_fields = [
-            ("keyword", "Keywords"),
-            ("string", "Strings"),
-            ("comment", "Comments"),
-            ("function", "Functions"),
-            ("type_", "Types"),
-            ("number", "Numbers"),
-            ("operator", "Operators"),
-            ("foreground", "Foreground"),
-            ("background", "Background"),
+            (
+                "Editor",
+                [
+                    ("background", "Background"),
+                    ("foreground", "Foreground"),
+                    ("current_line", "Current Line"),
+                    ("line_numbers_bg", "Line Numbers BG"),
+                    ("line_numbers_fg", "Line Numbers FG"),
+                ],
+            ),
+            (
+                "Syntax",
+                [
+                    ("keyword", "Keywords"),
+                    ("type_primitive", "Primitive Types"),
+                    ("type_class", "Classes"),
+                    ("type_struct", "Structs"),
+                    ("type_enum", "Enums"),
+                    ("namespace", "Namespaces"),
+                    ("function_call", "Function Calls"),
+                    ("function_definition", "Function Definitions"),
+                    ("member", "Members"),
+                    ("variable", "Variables"),
+                    ("variable_qualified", "Qualified Variables"),
+                    ("variable_builtin", "Built-in Variables"),
+                    ("operator", "Operators"),
+                    ("string", "Strings"),
+                    ("number", "Numbers"),
+                    ("comment", "Comments"),
+                    ("constant_builtin", "Built-in Constants"),
+                    ("preproc", "Preprocessor"),
+                ],
+            ),
         ]
 
-        for row, (field, label) in enumerate(color_fields):
-            label_widget = QLabel(label)
-            button = QPushButton()
-            button.setMinimumWidth(100)
-            button.setMinimumHeight(30)
+        row = 0
+        for section_name, fields in color_fields:
+            section_label = QLabel(f"<b>{section_name}</b>")
+            grid.addWidget(section_label, row, 0, 1, 2)
+            row += 1
 
-            color = getattr(self._colors, field)
-            button.setStyleSheet(f"background-color: {color};")
-            button.clicked.connect(
-                lambda checked, f=field, b=button: self._pick_color(f, b)
-            )
+            for field, label in fields:
+                label_widget = QLabel(label)
+                button = QPushButton()
+                button.setMinimumWidth(120)
+                button.setMinimumHeight(30)
 
-            self._color_buttons[field] = (button, color)
-            grid.addWidget(label_widget, row, 0)
-            grid.addWidget(button, row, 1)
+                color = getattr(self._colors, field)
+                button.setStyleSheet(
+                    f"background-color: {color}; color: {'#000' if self._is_light_color(color) else '#FFF'};"
+                )
+                button.setText(color)
+                button.clicked.connect(
+                    lambda checked, f=field, b=button: self._pick_color(f, b)
+                )
 
-        layout.addLayout(grid)
+                self._color_buttons[field] = (button, color)
+                grid.addWidget(label_widget, row, 0)
+                grid.addWidget(button, row, 1)
+                row += 1
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
 
         button_layout = QHBoxLayout()
 
@@ -95,6 +140,16 @@ class ThemePicker(QDialog):
 
         layout.addLayout(button_layout)
 
+    def _is_light_color(self, hex_color: str) -> bool:
+        try:
+            color = QColor(hex_color)
+            luminance = (
+                0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
+            ) / 255
+            return luminance > 0.5
+        except:
+            return False
+
     def _pick_color(self, field: str, button: QPushButton):
         current_color = QColor(self._color_buttons[field][1])
         color = QColorDialog.getColor(current_color, self, f"Pick color for {field}")
@@ -103,18 +158,46 @@ class ThemePicker(QDialog):
             hex_color = color.name()
             self._color_buttons[field] = (button, hex_color)
             setattr(self._colors, field, hex_color)
-            button.setStyleSheet(f"background-color: {hex_color};")
+            button.setStyleSheet(
+                f"background-color: {hex_color}; color: {'#000' if self._is_light_color(hex_color) else '#FFF'};"
+            )
+            button.setText(hex_color)
 
-    def _save_theme(self):
-        name, ok = QInputDialog.getText(self, "Save Theme", "Theme name:")
+    def _new_theme(self):
+        name, ok = QInputDialog.getText(self, "New Theme", "Theme name:")
         if ok and name:
+            if name in self._db.get_all_themes():
+                QMessageBox.warning(self, "Error", "Theme already exists")
+                return
             self._db.save_theme(name, self._colors.to_dict())
             self._theme_combo.addItem(name)
             self._theme_combo.setCurrentText(name)
 
-    def _delete_theme(self):
+    def _save_theme(self):
         name = self._theme_combo.currentText()
         if name:
+            self._db.save_theme(name, self._colors.to_dict())
+            QMessageBox.information(self, "Success", f"Theme '{name}' saved")
+        else:
+            name, ok = QInputDialog.getText(self, "Save Theme", "Theme name:")
+            if ok and name:
+                self._db.save_theme(name, self._colors.to_dict())
+                self._theme_combo.addItem(name)
+                self._theme_combo.setCurrentText(name)
+
+    def _delete_theme(self):
+        name = self._theme_combo.currentText()
+        if not name:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm",
+            f"Delete theme '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
             self._db.delete_theme(name)
             self._theme_combo.removeItem(self._theme_combo.currentIndex())
 
@@ -131,7 +214,10 @@ class ThemePicker(QDialog):
         for field, (button, _) in self._color_buttons.items():
             color = getattr(self._colors, field)
             self._color_buttons[field] = (button, color)
-            button.setStyleSheet(f"background-color: {color};")
+            button.setStyleSheet(
+                f"background-color: {color}; color: {'#000' if self._is_light_color(color) else '#FFF'};"
+            )
+            button.setText(color)
 
     def _apply_colors(self):
         self.colors_changed.emit(self._colors)

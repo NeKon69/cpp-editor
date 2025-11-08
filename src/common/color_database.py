@@ -1,128 +1,73 @@
 import sqlite3
-from pathlib import Path
-from typing import Optional, Dict
+import os
 import sys
+from pathlib import Path
+from typing import List, Optional
 
-from src.common.vars import log
+from src.configs.editor_config import EditorColors
 
 
 class ColorDatabase:
-    def __init__(self, db_path: Optional[Path] = None):
-        if db_path is None:
-            if getattr(sys, "frozen", False):
-                exe_dir = Path(sys.executable).parent
-            else:
-                exe_dir = Path.cwd()
+    def __init__(self):
+        self.db_path = self._get_db_path()
+        self.conn = sqlite3.connect(self.db_path)
+        self._create_table()
 
-            self.db_path = exe_dir / ".cpp_editor_colors.db"
+    def _get_db_path(self) -> Path:
+        if sys.platform.startswith("win"):
+            base_dir = Path(
+                os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+            )
+            appdir = base_dir / "CppEditor"
         else:
-            self.db_path = db_path
+            base_dir = Path(
+                os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share")
+            )
+            appdir = base_dir / "cpp_editor"
+        appdir.mkdir(parents=True, exist_ok=True)
+        return appdir / "themes.sqlite"
 
-        self._init_db()
-
-    def _init_db(self):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS color_themes (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT UNIQUE NOT NULL,
-                        keyword TEXT,
-                        string TEXT,
-                        comment TEXT,
-                        function TEXT,
-                        type_ TEXT,
-                        number TEXT,
-                        operator TEXT,
-                        foreground TEXT,
-                        background TEXT,
-                        current_line TEXT,
-                        line_numbers_bg TEXT,
-                        line_numbers_fg TEXT,
-                        selection TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
+    def _create_table(self):
+        with self.conn:
+            self.conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS themes (
+                    name TEXT PRIMARY KEY,
+                    data TEXT NOT NULL
                 )
-                conn.commit()
-        except Exception as e:
-            log(f"database init error: {e}")
+                """
+            )
 
-    def save_theme(self, name: str, colors: Dict[str, str]):
+    def get_all_themes(self) -> List[str]:
+        cursor = self.conn.execute("SELECT name FROM themes ORDER BY name ASC")
+        return [row[0] for row in cursor.fetchall()]
+
+    def load_theme(self, name: str) -> Optional[dict]:
+        cursor = self.conn.execute("SELECT data FROM themes WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        import json
+
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO color_themes 
-                    (name, keyword, string, comment, function, type_, number, operator, 
-                     foreground, background, current_line, line_numbers_bg, line_numbers_fg, selection)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            data = json.loads(row[0])
+            return data
+        except Exception:
+            return None
+
+    def save_theme(self, name: str, colors_dict: dict):
+        import json
+
+        data_json = json.dumps(colors_dict)
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO themes (name, data) VALUES (?, ?)
+                ON CONFLICT(name) DO UPDATE SET data=excluded.data
                 """,
-                    (
-                        name,
-                        colors.get("keyword"),
-                        colors.get("string"),
-                        colors.get("comment"),
-                        colors.get("function"),
-                        colors.get("type_"),
-                        colors.get("number"),
-                        colors.get("operator"),
-                        colors.get("foreground"),
-                        colors.get("background"),
-                        colors.get("current_line"),
-                        colors.get("line_numbers_bg"),
-                        colors.get("line_numbers_fg"),
-                        colors.get("selection"),
-                    ),
-                )
-                conn.commit()
-            log(f"theme saved: {name}")
-        except Exception as e:
-            log(f"failed to save theme: {e}")
-
-    def load_theme(self, name: str) -> Optional[Dict[str, str]]:
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
-                    "SELECT * FROM color_themes WHERE name = ?", (name,)
-                )
-                row = cursor.fetchone()
-
-                if row:
-                    return {
-                        "keyword": row[2],
-                        "string": row[3],
-                        "comment": row[4],
-                        "function": row[5],
-                        "type_": row[6],
-                        "number": row[7],
-                        "operator": row[8],
-                        "foreground": row[9],
-                        "background": row[10],
-                        "current_line": row[11],
-                        "line_numbers_bg": row[12],
-                        "line_numbers_fg": row[13],
-                        "selection": row[14],
-                    }
-        except Exception as e:
-            log(f"failed to load theme: {e}")
-        return None
-
-    def get_all_themes(self) -> list:
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("SELECT name FROM color_themes ORDER BY name")
-                return [row[0] for row in cursor.fetchall()]
-        except Exception as e:
-            log(f"failed to get themes: {e}")
-        return []
+                (name, data_json),
+            )
 
     def delete_theme(self, name: str):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("DELETE FROM color_themes WHERE name = ?", (name,))
-                conn.commit()
-            log(f"theme deleted: {name}")
-        except Exception as e:
-            log(f"failed to delete theme: {e}")
+        with self.conn:
+            self.conn.execute("DELETE FROM themes WHERE name = ?", (name,))

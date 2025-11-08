@@ -1,50 +1,51 @@
-from dataclasses import dataclass, field
-from pathlib import Path
-import json
+from PyQt6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QLineEdit,
+    QPushButton,
+    QHBoxLayout,
+)
 
 
-@dataclass
-class BuildConfig:
-    compiler: str = "gcc"
-    config_mode: str = "custom"
-    build_command: str = "cmake -B build && cmake --build build"
-    run_command: str = "./build/app"
-    config_path: Path = field(
-        default_factory=lambda: Path.home() / ".cpp_editor_build.json"
-    )
+class BuildConfig(QDialog):
+    def __init__(self, build_helper, parent=None):
+        super().__init__(parent)
+        self._build_helper = build_helper
+        self.setWindowTitle("Build Settings")
+        self.setMinimumWidth(500)
+        self._setup_ui()
 
-    def save(self):
-        try:
-            config_dict = {
-                "compiler": self.compiler,
-                "config_mode": self.config_mode,
-                "build_command": self.build_command,
-                "run_command": self.run_command,
-            }
-            with open(self.config_path, "w") as f:
-                json.dump(config_dict, f, indent=2)
-        except Exception as e:
-            print(f"failed to save build config: {e}")
+    def _setup_ui(self):
+        layout = QVBoxLayout()
 
-    @classmethod
-    def load(cls):
-        config_path = Path.home() / ".cpp_editor_build.json"
-        if not config_path.exists():
-            return cls()
+        form_layout = QFormLayout()
 
-        try:
-            with open(config_path, "r") as f:
-                data = json.load(f)
+        self._build_cmd_edit = QLineEdit()
+        self._build_cmd_edit.setText(self._build_helper.get_build_command())
+        form_layout.addRow("Build Command:", self._build_cmd_edit)
 
-            return cls(
-                compiler=data.get("compiler", "gcc"),
-                config_mode=data.get("config_mode", "custom"),
-                build_command=data.get(
-                    "build_command", "cmake -B build && cmake --build build"
-                ),
-                run_command=data.get("run_command", "./build/app"),
-                config_path=config_path,
-            )
-        except Exception as e:
-            print(f"failed to load build config: {e}")
-            return cls()
+        self._run_cmd_edit = QLineEdit()
+        self._run_cmd_edit.setText(self._build_helper.get_run_command())
+        form_layout.addRow("Run Command:", self._run_cmd_edit)
+
+        layout.addLayout(form_layout)
+
+        button_layout = QHBoxLayout()
+
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self._save)
+        button_layout.addWidget(save_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def _save(self):
+        self._build_helper.set_build_command(self._build_cmd_edit.text())
+        self._build_helper.set_run_command(self._run_cmd_edit.text())
+        self.accept()

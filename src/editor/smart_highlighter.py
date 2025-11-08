@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import Dict, Optional, List
-import tempfile
+from datetime import datetime
 
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument, QTextCharFormat, QColor
+from PyQt6.QtCore import QThread, pyqtSignal, QObject
 
 from src.editor.preprocessor import CppPreprocessor
 from src.common.vars import log
@@ -12,305 +13,288 @@ import tree_sitter_cpp
 import traceback
 
 
-class SmartHighlighter(QSyntaxHighlighter):
-    def __init__(self, parent: QTextDocument, project_path: Path):
-        super().__init__(parent)
-        self.project_path = project_path
-        self.preprocessor = CppPreprocessor(project_path)
+def timestamp():
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+class PreprocessWorker(QObject):
+    finished = pyqtSignal(str, int, int)
+
+    def __init__(self, preprocessor, file_path):
+        super().__init__()
+        self.preprocessor = preprocessor
+        self.file_path = file_path
+        self.operation_id = 0
+
+    def run(self):
+        try:
+            result = self.preprocessor.preprocess(self.file_path)
+
+            if not result or not result.full_content:
+                log(f"[{timestamp()}] PreprocessWorker: no result")
+                self.finished.emit("", 0, self.operation_id)
+                return
+
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                original_content = f.read()
+
+            header_line_count = result.header_line_count
+            full_lines = result.full_content.split("\n")
+
+            if header_line_count > 0 and header_line_count < len(full_lines):
+                clean_header_lines = full_lines[:header_line_count]
+                clean_header = "\n".join(clean_header_lines)
+            else:
+                clean_header = ""
+
+            cache_file = (
+                self.file_path.parent / f"{self.file_path.stem}_preprocessed.cpp"
+            )
+            full_with_marker = (
+                clean_header
+                + "\n"
+                + original_content
+                + f"\n// SPLICE_LINE: {header_line_count}"
+            )
+            cache_file.write_text(full_with_marker, encoding="utf-8")
+            log(
+                f"[{timestamp()}] Saved to {cache_file.name}, splice={header_line_count}"
+            )
+
+            self.finished.emit(clean_header, header_line_count, self.operation_id)
+
+        except Exception as e:
+            log(f"[{timestamp()}] PreprocessWorker error: {e}")
+            log(traceback.format_exc())
+            self.finished.emit("", 0, self.operation_id)
+
+
+class TreeSitterWorker(QObject):
+    finished = pyqtSignal(object, dict, int, int)
+
+    def __init__(self):
+        super().__init__()
+        self.content = None
+        self.original_line_start = 0
+        self.operation_id = 0
 
         self._language = Language(tree_sitter_cpp.language())
         self._parser = Parser(self._language)
-
-        self._tree: Optional[Tree] = None
-        self._query: Optional[Query] = None
-        self._captures_by_line: Dict[int, List[dict]] = {}
-        self._formats: Dict[str, QTextCharFormat] = {}
-        self._original_line_start: int = 0
-
-        self._build_formats()
+        self._query = None
         self._build_query()
 
     def _build_query(self):
         query_str = """
-        ; Types - HIGHEST priority
-        (primitive_type) @type
-        (type_identifier) @type
-        (auto) @type
-        
-        ; Namespace identifiers
-        ((namespace_identifier) @namespace
-         (#match? @namespace "^[a-z_]"))
-        
-        ((namespace_identifier) @type
-         (#match? @type "^[A-Z]"))
-        
-        ; Qualified types (std::string, etc)
-        (qualified_identifier
-          name: (type_identifier) @qualified_type)
-        
-        ; Functions - BEFORE qualified_name to have priority
-        (call_expression
-          function: (qualified_identifier
-            name: (identifier) @function))
-        
-        (call_expression
-          function: (identifier) @function)
-        
-        (template_function
-          name: (identifier) @function)
-        
-        (template_method
-          name: (field_identifier) @function)
-        
-        (function_declarator
-          declarator: (identifier) @function)
-        
-        (function_declarator
-          declarator: (qualified_identifier
-            name: (identifier) @function))
-        
-        (function_declarator
-          declarator: (field_identifier) @function)
-        
-        ; Qualified names (after functions so functions take priority)
-        (qualified_identifier
-          name: (identifier) @qualified_name)
-        
-        ; Field members
-        (field_expression 
-          field: (field_identifier) @member)
-        
-        ; Built-in variables
-        (this) @variable.builtin
-        (true) @constant
-        (false) @constant
-        
-        ; Strings
-        (raw_string_literal) @string
-        (string_literal) @string
-        (char_literal) @string
-        (number_literal) @number
-        
-        ; Comments
-        (comment) @comment
-        
-        ; Preprocessor
-        (preproc_directive) @preproc
-        (preproc_include) @preproc
-        (preproc_def) @preproc
-        
-        ; Operators
-        (binary_expression
-          operator: _ @operator)
-        
-        (unary_expression
-          operator: _ @operator)
-        
-        ; Keywords
-        [
-          "catch"
-          "class"
-          "co_await"
-          "co_return"
-          "co_yield"
-          "constexpr"
-          "constinit"
-          "consteval"
-          "delete"
-          "explicit"
-          "final"
-          "friend"
-          "mutable"
-          "namespace"
-          "noexcept"
-          "new"
-          "override"
-          "private"
-          "protected"
-          "public"
-          "template"
-          "throw"
-          "try"
-          "typename"
-          "using"
-          "concept"
-          "requires"
-          "virtual"
-          "if"
-          "else"
-          "while"
-          "for"
-          "do"
-          "return"
-          "break"
-          "continue"
-          "switch"
-          "case"
-          "default"
-          "goto"
-          "struct"
-          "enum"
-          "union"
-          "typedef"
-          "static"
-          "const"
-          "inline"
-          "sizeof"
-          "operator"
-          "nullptr"
-        ] @keyword
-        
-        ; All identifiers as variables (LOWEST priority)
-        (identifier) @variable
-        """
+    (primitive_type) @type.primitive
+    (auto) @keyword.auto
+    
+    ; User-defined types
+    (type_identifier) @type.class
+    
+    ; Template types
+    (template_type
+      name: (type_identifier) @type.class)
+    
+    ; Class/struct declarations
+    (class_specifier
+      name: (type_identifier) @type.class)
+    
+    (struct_specifier
+      name: (type_identifier) @type.struct)
+    
+    (enum_specifier
+      name: (type_identifier) @type.enum)
+    
+    ; Namespaces
+    (namespace_identifier) @namespace
+    
+    ; Qualified identifiers
+    (qualified_identifier
+      scope: (namespace_identifier) @namespace
+      name: (type_identifier) @type.class)
+    
+    (qualified_identifier
+      scope: (namespace_identifier) @namespace)
+    
+    ; Function calls
+    (call_expression
+      function: (qualified_identifier
+        name: (identifier) @function.call))
+    
+    (call_expression
+      function: (identifier) @function.call)
+    
+    (call_expression
+      function: (field_expression
+        field: (field_identifier) @function.call))
+    
+    ; Function declarations
+    (function_declarator
+      declarator: (identifier) @function.definition)
+    
+    (function_declarator
+      declarator: (qualified_identifier
+        name: (identifier) @function.definition))
+    
+    (function_declarator
+      declarator: (field_identifier) @function.definition)
+    
+    ; Template functions
+    (template_function
+      name: (identifier) @function.definition)
+    
+    (template_method
+      name: (field_identifier) @function.definition)
+    
+    ; Member access
+    (field_expression 
+      field: (field_identifier) @member)
+    
+    ; Qualified names
+    (qualified_identifier
+      name: (identifier) @variable.qualified)
+    
+    ; Special identifiers
+    (this) @variable.builtin
+    (true) @constant.builtin
+    (false) @constant.builtin
+    
+    ; nullptr as identifier
+    ((identifier) @constant.builtin
+     (#eq? @constant.builtin "nullptr"))
+    
+    ; Literals
+    (string_literal) @string
+    (raw_string_literal) @string
+    (char_literal) @string
+    (number_literal) @number
+    
+    ; Comments
+    (comment) @comment
+    
+    ; Preprocessor - only real nodes
+    (preproc_include) @preproc
+    (preproc_def) @preproc
+    (preproc_function_def) @preproc
+    (preproc_call) @preproc
+    (preproc_if) @preproc
+    (preproc_ifdef) @preproc
+    (preproc_else) @preproc
+    (preproc_elif) @preproc
+    
+    ; Operators
+    (binary_expression
+      operator: _ @operator)
+    
+    (unary_expression
+      operator: _ @operator)
+    
+    (update_expression
+      operator: _ @operator)
+    
+    ; Keywords
+    [
+      "catch"
+      "class"
+      "co_await"
+      "co_return"
+      "co_yield"
+      "constexpr"
+      "constinit"
+      "consteval"
+      "delete"
+      "explicit"
+      "final"
+      "friend"
+      "mutable"
+      "namespace"
+      "noexcept"
+      "new"
+      "override"
+      "private"
+      "protected"
+      "public"
+      "template"
+      "throw"
+      "try"
+      "typename"
+      "using"
+      "concept"
+      "requires"
+      "virtual"
+      "if"
+      "else"
+      "while"
+      "for"
+      "do"
+      "return"
+      "break"
+      "continue"
+      "switch"
+      "case"
+      "default"
+      "goto"
+      "struct"
+      "enum"
+      "union"
+      "typedef"
+      "static"
+      "const"
+      "inline"
+      "extern"
+      "sizeof"
+      "operator"
+    ] @keyword
+    
+    ; Regular variables (LOWEST priority)
+    (identifier) @variable
+    """
 
         self._query = self._language.query(query_str)
 
-    def _build_formats(self):
-        keyword_fmt = QTextCharFormat()
-        keyword_fmt.setForeground(QColor("#D946EF"))
-        keyword_fmt.setFontWeight(600)
-        self._formats["keyword"] = keyword_fmt
-
-        type_fmt = QTextCharFormat()
-        type_fmt.setForeground(QColor("#00F0FF"))
-        type_fmt.setFontWeight(600)
-        self._formats["type"] = type_fmt
-
-        namespace_fmt = QTextCharFormat()
-        namespace_fmt.setForeground(QColor("#00F0FF"))
-        self._formats["namespace"] = namespace_fmt
-
-        qualified_type_fmt = QTextCharFormat()
-        qualified_type_fmt.setForeground(QColor("#00F0FF"))
-        self._formats["qualified_type"] = qualified_type_fmt
-
-        qualified_name_fmt = QTextCharFormat()
-        qualified_name_fmt.setForeground(QColor("#FFFFFF"))
-        self._formats["qualified_name"] = qualified_name_fmt
-
-        function_fmt = QTextCharFormat()
-        function_fmt.setForeground(QColor("#FFFF00"))
-        function_fmt.setFontWeight(700)
-        self._formats["function"] = function_fmt
-
-        member_fmt = QTextCharFormat()
-        member_fmt.setForeground(QColor("#FFFF00"))
-        self._formats["member"] = member_fmt
-
-        variable_fmt = QTextCharFormat()
-        variable_fmt.setForeground(QColor("#FFFFFF"))
-        self._formats["variable"] = variable_fmt
-
-        variable_builtin_fmt = QTextCharFormat()
-        variable_builtin_fmt.setForeground(QColor("#D946EF"))
-        self._formats["variable.builtin"] = variable_builtin_fmt
-
-        operator_fmt = QTextCharFormat()
-        operator_fmt.setForeground(QColor("#D946EF"))
-        self._formats["operator"] = operator_fmt
-
-        string_fmt = QTextCharFormat()
-        string_fmt.setForeground(QColor("#FF7A5C"))
-        self._formats["string"] = string_fmt
-
-        number_fmt = QTextCharFormat()
-        number_fmt.setForeground(QColor("#7FFF00"))
-        self._formats["number"] = number_fmt
-
-        comment_fmt = QTextCharFormat()
-        comment_fmt.setForeground(QColor("#888888"))
-        comment_fmt.setFontItalic(True)
-        self._formats["comment"] = comment_fmt
-
-        constant_fmt = QTextCharFormat()
-        constant_fmt.setForeground(QColor("#7FFF00"))
-        self._formats["constant"] = constant_fmt
-
-        preproc_fmt = QTextCharFormat()
-        preproc_fmt.setForeground(QColor("#D946EF"))
-        self._formats["preproc"] = preproc_fmt
-
-    def preprocess_file(self, file_path: Path):
+    def run(self):
         try:
-            log(f"Preprocessing {file_path}")
+            content_bytes = self.content.encode("utf-8")
+            tree = self._parser.parse(content_bytes)
 
-            with open(file_path, "r", encoding="utf-8") as f:
-                original_content = f.read()
+            captures_by_line = self._query_and_sort_captures(tree)
 
-            result = self.preprocessor.preprocess(file_path)
-
-            if not result or not result.full_content:
-                log("Preprocessor failed, using original content")
-                self._prepare_tree_sitter(original_content)
-                self._original_line_start = 0
-            else:
-                preprocessed = result.full_content
-                self._original_line_start = result.header_line_count
-
-                if self._original_line_start < 0:
-                    log("Warning: header_line_count is negative, resetting to 0")
-                    self._original_line_start = 0
-
-                prep_lines = preprocessed.split("\n")
-                empty_lines_at_start = 0
-                for line in prep_lines:
-                    if line.strip() == "":
-                        empty_lines_at_start += 1
-                    else:
-                        break
-
-                self._original_line_start += empty_lines_at_start
-
-                log(
-                    f"Preprocessed: {len(preprocessed)} bytes, header lines: {self._original_line_start}, empty lines at start: {empty_lines_at_start}"
-                )
-                self._prepare_tree_sitter(preprocessed)
-
-            self._query_and_sort_captures()
-            self.rehighlight()
-            log("Highlighter updated successfully")
-
+            self.finished.emit(
+                tree, captures_by_line, self.original_line_start, self.operation_id
+            )
         except Exception as e:
-            log(f"Error in preprocess_file: {e}")
+            log(f"[{timestamp()}] TreeSitterWorker error: {e}")
             log(traceback.format_exc())
+            self.finished.emit(None, {}, self.original_line_start, self.operation_id)
 
-    def _prepare_tree_sitter(self, content: str):
-        try:
-            content_bytes = content.encode("utf-8")
-            self._tree = self._parser.parse(content_bytes)
-            log(f"Tree-sitter parsed successfully")
-        except Exception as e:
-            log(f"Error parsing with tree-sitter: {e}")
-            self._tree = None
-
-    def _query_and_sort_captures(self):
-        if not self._tree or not self._query:
-            log("No tree or query available")
-            return
+    def _query_and_sort_captures(self, tree):
+        captures_by_line = {}
 
         try:
-            self._captures_by_line.clear()
-
             cursor = QueryCursor(self._query)
-            captures_dict = cursor.captures(self._tree.root_node)
+            captures_dict = cursor.captures(tree.root_node)
 
             priority = {
-                "type": 100,
+                "type.class": 110,
+                "type.struct": 110,
+                "type.enum": 110,
+                "type.primitive": 105,
                 "namespace": 100,
-                "qualified_type": 100,
-                "function": 90,
+                "function.call": 95,
+                "function.definition": 95,
                 "member": 90,
-                "variable.builtin": 80,
-                "qualified_name": 80,
-                "operator": 70,
-                "variable": 70,
-                "string": 60,
-                "number": 60,
-                "constant": 60,
-                "preproc": 40,
+                "variable.builtin": 85,
+                "variable.qualified": 80,
+                "constant.builtin": 75,
+                "keyword.auto": 70,
+                "keyword.decltype": 70,
+                "keyword": 70,
+                "operator": 65,
+                "variable": 60,
+                "string": 55,
+                "number": 55,
                 "comment": 50,
-                "keyword": 40,
+                "preproc": 45,
             }
 
             captures_by_pos: Dict[tuple, List[tuple]] = {}
@@ -322,23 +306,15 @@ class SmartHighlighter(QSyntaxHighlighter):
                     end_row = node.end_point[0]
                     end_col = node.end_point[1]
 
-                    adjusted_row = start_row - self._original_line_start
+                    adjusted_row = start_row - self.original_line_start
 
                     if adjusted_row < 0:
-                        log(
-                            f"[SKIP] Row {start_row}: before header cutpoint (original_line_start={self._original_line_start})"
-                        )
                         continue
 
                     length = (
                         end_col - start_col
                         if start_row == end_row
                         else len(node.text or b"")
-                    )
-                    node_text = (node.text or b"").decode("utf-8", errors="replace")
-
-                    log(
-                        f"[TOKEN] Line {adjusted_row+1}: '{node_text}' -> @{capture_name} @ col {start_col}-{end_col}"
                     )
 
                     pos_key = (adjusted_row, start_col, length)
@@ -350,100 +326,267 @@ class SmartHighlighter(QSyntaxHighlighter):
                     )
 
             for (adjusted_row, start_col, length), captures in captures_by_pos.items():
-                if adjusted_row not in self._captures_by_line:
-                    self._captures_by_line[adjusted_row] = []
+                if adjusted_row not in captures_by_line:
+                    captures_by_line[adjusted_row] = []
 
                 best_capture = max(captures, key=lambda x: x[1])
 
-                self._captures_by_line[adjusted_row].append(
+                captures_by_line[adjusted_row].append(
                     {"name": best_capture[0], "start_col": start_col, "length": length}
                 )
 
-            log(
-                f"Captured {sum(len(v) for v in self._captures_by_line.values())} elements across {len(self._captures_by_line)} lines, original_line_start={self._original_line_start}"
-            )
-
         except Exception as e:
-            log(f"Error in query_and_sort_captures: {e}")
-            log(traceback.format_exc())
+            log(f"[{timestamp()}] Error in query_and_sort_captures: {e}")
+
+        return captures_by_line
+
+
+class SmartHighlighter(QSyntaxHighlighter):
+    def __init__(self, parent: QTextDocument, project_path: Path):
+        super().__init__(parent)
+        self.project_path = project_path
+        self.preprocessor = CppPreprocessor(project_path)
+
+        self._tree: Optional[Tree] = None
+        self._captures_by_line: Dict[int, List[dict]] = {}
+        self._formats: Dict[str, QTextCharFormat] = {}
+        self._original_line_start: int = 0
+
+        self._preprocessed_header: str = ""
+        self._file_path: Optional[Path] = None
+
+        self._preprocess_worker = None
+        self._preprocess_thread = None
+        self._tree_worker = None
+        self._tree_thread = None
+        self._is_preprocessing = False
+        self._is_tree_processing = False
+        self._operation_counter = 0
+        self._last_completed_operation = 0
+
+        self._build_formats()
+
+    def _build_formats(self):
+        keyword_fmt = QTextCharFormat()
+
+        keyword_fmt.setForeground(QColor("#D946EF"))
+
+        keyword_fmt.setFontWeight(600)
+
+        self._formats["keyword"] = keyword_fmt
+
+        keyword_auto_fmt = QTextCharFormat()
+        keyword_auto_fmt.setForeground(QColor("#D946EF"))
+        keyword_auto_fmt.setFontWeight(600)
+        self._formats["keyword.auto"] = keyword_auto_fmt
+
+        keyword_decltype_fmt = QTextCharFormat()
+        keyword_decltype_fmt.setForeground(QColor("#D946EF"))
+        keyword_decltype_fmt.setFontWeight(600)
+        self._formats["keyword.decltype"] = keyword_decltype_fmt
+
+        type_primitive_fmt = QTextCharFormat()
+        type_primitive_fmt.setForeground(QColor("#00F0FF"))
+        type_primitive_fmt.setFontWeight(600)
+        self._formats["type.primitive"] = type_primitive_fmt
+
+        type_class_fmt = QTextCharFormat()
+        type_class_fmt.setForeground(QColor("#50FA7B"))
+        type_class_fmt.setFontWeight(700)
+        self._formats["type.class"] = type_class_fmt
+
+        type_struct_fmt = QTextCharFormat()
+        type_struct_fmt.setForeground(QColor("#50FA7B"))
+        type_struct_fmt.setFontWeight(700)
+        self._formats["type.struct"] = type_struct_fmt
+
+        type_enum_fmt = QTextCharFormat()
+        type_enum_fmt.setForeground(QColor("#50FA7B"))
+        type_enum_fmt.setFontWeight(700)
+        self._formats["type.enum"] = type_enum_fmt
+
+        namespace_fmt = QTextCharFormat()
+        namespace_fmt.setForeground(QColor("#8BE9FD"))
+        namespace_fmt.setFontItalic(True)
+        self._formats["namespace"] = namespace_fmt
+
+        function_call_fmt = QTextCharFormat()
+        function_call_fmt.setForeground(QColor("#FFFF00"))
+        function_call_fmt.setFontWeight(700)
+        self._formats["function.call"] = function_call_fmt
+
+        function_def_fmt = QTextCharFormat()
+        function_def_fmt.setForeground(QColor("#FFD700"))
+        function_def_fmt.setFontWeight(700)
+        self._formats["function.definition"] = function_def_fmt
+
+        member_fmt = QTextCharFormat()
+        member_fmt.setForeground(QColor("#FFFF00"))
+        self._formats["member"] = member_fmt
+
+        variable_fmt = QTextCharFormat()
+        variable_fmt.setForeground(QColor("#FFFFFF"))
+        self._formats["variable"] = variable_fmt
+
+        variable_qualified_fmt = QTextCharFormat()
+        variable_qualified_fmt.setForeground(QColor("#F8F8F2"))
+        self._formats["variable.qualified"] = variable_qualified_fmt
+
+        variable_builtin_fmt = QTextCharFormat()
+        variable_builtin_fmt.setForeground(QColor("#D946EF"))
+
+        self._formats["variable.builtin"] = variable_builtin_fmt
+
+        operator_fmt = QTextCharFormat()
+        operator_fmt.setForeground(QColor("#FF79C6"))
+        self._formats["operator"] = operator_fmt
+
+        string_fmt = QTextCharFormat()
+        string_fmt.setForeground(QColor("#FF7A5C"))
+        self._formats["string"] = string_fmt
+
+        number_fmt = QTextCharFormat()
+        number_fmt.setForeground(QColor("#BD93F9"))
+        self._formats["number"] = number_fmt
+
+        comment_fmt = QTextCharFormat()
+        comment_fmt.setForeground(QColor("#6272A4"))
+        comment_fmt.setFontItalic(True)
+        self._formats["comment"] = comment_fmt
+
+        constant_builtin_fmt = QTextCharFormat()
+
+        constant_builtin_fmt.setForeground(QColor("#BD93F9"))
+        self._formats["constant.builtin"] = constant_builtin_fmt
+
+        preproc_fmt = QTextCharFormat()
+        preproc_fmt.setForeground(QColor("#FF79C6"))
+        self._formats["preproc"] = preproc_fmt
+
+    def preprocess_file(self, file_path: Path, reason: str = "unknown"):
+        if self._is_preprocessing:
+            return
+
+        self._operation_counter += 1
+        operation_id = self._operation_counter
+        log(f"[{timestamp()}] TRIGGER_HEAVY reason={reason} id={operation_id}")
+
+        self._is_preprocessing = True
+        self._file_path = file_path
+
+        self._preprocess_thread = QThread()
+        self._preprocess_worker = PreprocessWorker(self.preprocessor, file_path)
+        self._preprocess_worker.operation_id = operation_id
+        self._preprocess_worker.moveToThread(self._preprocess_thread)
+
+        self._preprocess_thread.started.connect(self._preprocess_worker.run)
+        self._preprocess_worker.finished.connect(self._on_preprocess_finished)
+        self._preprocess_worker.finished.connect(self._preprocess_thread.quit)
+        self._preprocess_worker.finished.connect(self._preprocess_worker.deleteLater)
+        self._preprocess_thread.finished.connect(self._preprocess_thread.deleteLater)
+
+        self._preprocess_thread.start()
+
+    def _on_preprocess_finished(
+        self, preprocessed_header, header_line_count, operation_id
+    ):
+        log(
+            f"[{timestamp()}] PREPROCESS_DONE id={operation_id} lines={header_line_count}"
+        )
+
+        self._is_preprocessing = False
+
+        if self._last_completed_operation > operation_id:
+            log(f"[{timestamp()}] SKIP_OLD id={operation_id}")
+            return
+
+        self._preprocessed_header = preprocessed_header
+        self._original_line_start = header_line_count
+
+        with open(self._file_path, "r", encoding="utf-8") as f:
+            file_content = f.read()
+
+        if header_line_count > 0:
+            full_content = self._preprocessed_header + "\n" + file_content
+        else:
+            full_content = file_content
+
+        self._last_completed_operation = operation_id
+        self._start_tree_sitter(full_content, operation_id)
+
+    def _start_tree_sitter(self, content: str, parent_operation_id: int):
+        if self._is_tree_processing:
+            return
+
+        operation_id = parent_operation_id
+
+        self._is_tree_processing = True
+
+        self._tree_thread = QThread()
+        self._tree_worker = TreeSitterWorker()
+        self._tree_worker.content = content
+        self._tree_worker.original_line_start = self._original_line_start
+        self._tree_worker.operation_id = operation_id
+        self._tree_worker.moveToThread(self._tree_thread)
+
+        self._tree_thread.started.connect(self._tree_worker.run)
+        self._tree_worker.finished.connect(self._on_tree_finished)
+        self._tree_worker.finished.connect(self._tree_thread.quit)
+        self._tree_worker.finished.connect(self._tree_worker.deleteLater)
+        self._tree_thread.finished.connect(self._tree_thread.deleteLater)
+
+        self._tree_thread.start()
+
+    def _on_tree_finished(
+        self, tree, captures_by_line, original_line_start, operation_id
+    ):
+        log(f"[{timestamp()}] TREE_DONE id={operation_id}")
+        self._is_tree_processing = False
+
+        if tree is None:
+            return
+
+        if self._last_completed_operation > operation_id:
+            log(f"[{timestamp()}] SKIP_OLD_TREE id={operation_id}")
+            return
+
+        self._last_completed_operation = operation_id
+        self._tree = tree
+        self._captures_by_line = captures_by_line
+        self._original_line_start = original_line_start
+
+        log(f"[{timestamp()}] REHIGHLIGHT id={operation_id}")
+        self.rehighlight()
 
     def highlightBlock(self, text: str):
-        try:
-            block_number = self.currentBlock().blockNumber()
+        block_number = self.currentBlock().blockNumber()
 
-            if block_number not in self._captures_by_line:
-                return
+        if block_number not in self._captures_by_line:
+            return
 
-            captures = self._captures_by_line[block_number]
+        captures = self._captures_by_line[block_number]
 
-            for capture in captures:
-                capture_name = capture["name"]
-                start_col = capture["start_col"]
-                length = capture["length"]
+        for capture in captures:
+            capture_name = capture["name"]
+            start_col = capture["start_col"]
+            length = capture["length"]
 
-                if capture_name in self._formats:
-                    self.setFormat(start_col, length, self._formats[capture_name])
+            if capture_name in self._formats:
+                self.setFormat(start_col, length, self._formats[capture_name])
 
-        except Exception as e:
-            log(f"Error in highlightBlock: {e}")
+    def update_tree(self, content: str, reason: str = "light"):
+        if self._is_tree_processing:
+            return
 
-    def update_tree(self, content: str):
-        try:
-            log(f"update_tree called with {len(content)} bytes")
+        self._operation_counter += 1
 
-            if not self.preprocessor:
-                self._prepare_tree_sitter(content)
-                self._original_line_start = 0
-                self._query_and_sort_captures()
-                self.rehighlight()
-                return
+        operation_id = self._operation_counter
 
-            try:
-                project_tmp = self.project_path / ".highlight_tmp.cpp"
-                project_tmp.write_text(content, encoding="utf-8")
+        log(f"[{timestamp()}] TRIGGER_LIGHT reason={reason} id={operation_id}")
 
-                try:
-                    result = self.preprocessor.preprocess(project_tmp)
+        if self._original_line_start > 0 and self._preprocessed_header:
+            full_content = self._preprocessed_header + "\n" + content
+        else:
+            full_content = content
 
-                    if result and result.full_content:
-                        preprocessed = result.full_content
-                        self._original_line_start = result.header_line_count
-
-                        if self._original_line_start < 0:
-                            log(
-                                "Warning: header_line_count is negative in update_tree, resetting to 0"
-                            )
-                            self._original_line_start = 0
-
-                        prep_lines = preprocessed.split("\n")
-                        empty_lines_at_start = 0
-                        for line in prep_lines:
-                            if line.strip() == "":
-                                empty_lines_at_start += 1
-                            else:
-                                break
-
-                        self._original_line_start += empty_lines_at_start
-
-                        log(
-                            f"Preprocessed in update_tree: {len(preprocessed)} bytes, header lines: {self._original_line_start}, empty lines at start: {empty_lines_at_start}"
-                        )
-                        self._prepare_tree_sitter(preprocessed)
-                    else:
-                        log("Preprocessor failed in update_tree, using original")
-                        self._prepare_tree_sitter(content)
-                        self._original_line_start = 0
-                finally:
-                    project_tmp.unlink(missing_ok=True)
-            except Exception as e:
-                log(f"Error preprocessing in update_tree: {e}")
-                self._prepare_tree_sitter(content)
-                self._original_line_start = 0
-
-            self._query_and_sort_captures()
-            self.rehighlight()
-            log("update_tree completed successfully")
-
-        except Exception as e:
-            log(f"Error in update_tree: {e}")
-            log(traceback.format_exc())
+        self._start_tree_sitter(full_content, operation_id)

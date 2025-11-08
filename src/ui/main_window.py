@@ -20,7 +20,7 @@ from src.configs.build_config import BuildConfig
 from src.editor.editor_widget import CodeEditor
 from src.editor.lsp_integration import LspIntegration
 from src.editor.completer import LspCompleter
-from src.editor.cmake_helper import CMakeHelper
+from src.editor.build_helper import BuildHelper
 from src.lsp_server.session import LspSession
 from src.ui.file_tree import FileTree
 from src.ui.diagnostics_panel import DiagnosticsPanel
@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         self._project_path = project_path
         self._current_file: Optional[Path] = None
         self._editor_config = EditorConfig.load()
-        self._build_config = BuildConfig.load()
+        self._build_helper = BuildHelper(project_path)
         self._process_runner: Optional[ProcessRunner] = None
 
         self._setup_window()
@@ -102,17 +102,16 @@ class MainWindow(QMainWindow):
         h_splitter.addWidget(v_splitter)
         h_splitter.setStretchFactor(0, 0)
         h_splitter.setStretchFactor(1, 1)
-        h_splitter.setSizes([250, 1350])
 
         self._terminal = TerminalWidget()
-        self._terminal.setMaximumHeight(150)
+        self._terminal.set_working_dir(self._project_path)
+        self._terminal.setMaximumHeight(1000)
         self._terminal.hide()
 
         main_splitter.addWidget(h_splitter)
         main_splitter.addWidget(self._terminal)
         main_splitter.setStretchFactor(0, 1)
         main_splitter.setStretchFactor(1, 0)
-        main_splitter.setSizes([700, 0])
 
         main_layout.addWidget(main_splitter)
 
@@ -323,6 +322,7 @@ class MainWindow(QMainWindow):
                 self._project_path = Path(directory)
                 self._file_tree.set_root_path(self._project_path)
                 self._editor.set_project_path(self._project_path)
+                self._build_helper = BuildHelper(self._project_path)
                 self.setWindowTitle(f"C++ Editor - {self._project_path.name}")
                 self._statusbar.showMessage(
                     f"Project changed to: {self._project_path.name}"
@@ -376,66 +376,27 @@ class MainWindow(QMainWindow):
 
     def _open_build_settings(self):
         try:
-            settings_dialog = BuildSettings(self._build_config, self)
+            settings_dialog = BuildConfig(self._build_helper, self)
             if settings_dialog.exec():
-                self._build_config = settings_dialog.get_config()
-                self._statusbar.showMessage(
-                    f"Build config: {self._build_config.config_mode}"
-                )
+                self._statusbar.showMessage("Build settings saved")
 
         except Exception as e:
             log(f"failed to open build settings: {e}")
 
     def _build_project(self):
-        if self._process_runner and self._process_runner.isRunning():
-            self._statusbar.showMessage("Build already running")
-            return
-
         self._terminal.show()
-        self._terminal.clear()
-        self._terminal.set_title("Build Output")
 
-        build_cmd = self._build_config.build_command
+        build_cmd = self._build_helper.get_build_command()
+        self._terminal.execute_command(build_cmd)
 
-        if self._build_config.config_mode == "cmake":
-            try:
-                cmake_helper = CMakeHelper(
-                    self._project_path, self._build_config.compiler
-                )
-                generator = cmake_helper.get_cmake_generator()
-                cxx_compiler = cmake_helper.get_cmake_cxx_compiler()
-
-                build_cmd = f'cmake -B build -G"{generator}" -DCMAKE_CXX_COMPILER={cxx_compiler} && cmake --build build'
-            except Exception as e:
-                self._terminal.append_text(f"Error: {str(e)}", error=True)
-                return
-
-        self._process_runner = ProcessRunner(build_cmd, self._project_path)
-        self._process_runner.output.connect(self._on_process_output)
-        self._process_runner.error.connect(self._on_process_error)
-        self._process_runner.finished.connect(self._on_process_finished)
-
-        self._process_runner.start()
         self._statusbar.showMessage("Building...")
 
     def _run_project(self):
-        if self._process_runner and self._process_runner.isRunning():
-            self._statusbar.showMessage("Process already running")
-            return
-
         self._terminal.show()
-        self._terminal.clear()
-        self._terminal.set_title("Run Output")
-
-        self._process_runner = ProcessRunner(
-            self._build_config.run_command, self._project_path
-        )
-
-        self._process_runner.output.connect(self._on_process_output)
-        self._process_runner.error.connect(self._on_process_error)
-        self._process_runner.finished.connect(self._on_process_finished)
-
-        self._process_runner.start()
+        build_cmd = self._build_helper.get_build_command()
+        run_cmd = self._build_helper.get_run_command()
+        combined_cmd = f"{build_cmd} && {run_cmd}"
+        self._terminal.execute_command(combined_cmd)
         self._statusbar.showMessage("Running...")
 
     @pyqtSlot(str)
