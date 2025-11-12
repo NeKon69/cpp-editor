@@ -3,6 +3,7 @@ import threading
 import time
 import queue
 from pathlib import Path
+from typing import Optional
 from src.common.vars import log, ClangdNotFoundError
 import sansio_lsp_client as lsp
 
@@ -10,7 +11,7 @@ import sansio_lsp_client as lsp
 class ClangdProcess:
     def __init__(self, project_path: str, lsp_client=None):
         self.project_path = project_path
-        self.process = None
+        self.process: subprocess.Popen = None
         self.lsp_client = lsp_client
         self._reader_thread = None
         self._stderr_thread = None

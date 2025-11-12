@@ -133,7 +133,10 @@ class LspSession:
     def get_completion(self, file_path: str, line: int, character: int):
         uri = self._resolve_uri(file_path)
         if not self._check_file_open(uri, file_path):
+            log(f"session: file not open")
             return None
+
+        log(f"session: request {file_path} line={line} char={character}")
 
         msg_id = self.engine.lsp_client.completion(
             lsp.TextDocumentPosition(
@@ -141,9 +144,26 @@ class LspSession:
                 position=lsp.Position(line=line, character=character),
             )
         )
+
+        log(f"session: sent msg_id={msg_id} type={type(msg_id)}")
+
         response = self._send_lsp_request(msg_id)
+
+        log(f"session: response type={type(response).__name__ if response else 'None'}")
+
         if response and isinstance(response, lsp.Completion):
-            return response.completion_list
+            if hasattr(response, "completion_list") and response.completion_list:
+                items_count = (
+                    len(response.completion_list.items)
+                    if response.completion_list.items
+                    else 0
+                )
+                log(f"session: completion_list has {items_count} items")
+                return response.completion_list
+            else:
+                log(f"session: no completion_list in response")
+        else:
+            log(f"session: response is not Completion")
         return None
 
     def goto_definition(self, file_path: str, line: int, character: int):

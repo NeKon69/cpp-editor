@@ -1,7 +1,5 @@
 import platform
 import os
-import re
-import signal
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QProcess, QProcessEnvironment
 from PyQt6.QtGui import QFont, QTextCursor, QColor
 from PyQt6.QtWidgets import (
@@ -14,8 +12,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 
-from src.common.vars import log
-
 MAX_BUFFER_SIZE = 5000
 
 
@@ -26,7 +22,7 @@ class TerminalWidget(QWidget):
         self._working_dir = None
         self._setup_ui()
         self._shell = (
-            ("powershell.exe", ["-Command"])
+            ("cmd.exe", ["/C"])
             if platform.system().lower() == "windows"
             else ("/bin/bash", ["-c"])
         )

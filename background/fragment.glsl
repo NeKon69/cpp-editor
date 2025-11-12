@@ -22,6 +22,7 @@ precision mediump float;
 uniform sampler2D iChannel0;
 out vec4 outColor;
 uniform vec2 ViewportSize;
+uniform float Brightness;
 uniform float Time;
 
 #define ZOOM 0.7
@@ -121,5 +122,5 @@ void main()
     postProcessedColor += (random(uv * Time) - 0.5) * FILM_GRAIN_STRENGTH;
     #endif
 
-    outColor = vec4(postProcessedColor, 1.0);
+    outColor = vec4(finalColor * Brightness, 1.0);
 }

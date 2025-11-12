@@ -6,6 +6,7 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSignal,
     QRect,
+    QSize,
 )
 from PyQt6.QtGui import (
     QFont,
@@ -23,7 +24,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
 )
 
-from src.configs.editor_config import EditorColors
+from src.configs.editor_config import EditorConfig, EditorColors
 from src.editor.smart_highlighter import SmartHighlighter
 
 
@@ -64,7 +65,7 @@ class CodeEditor(QPlainTextEdit):
 
         self._light_highlight_timer = QTimer(self)
         self._light_highlight_timer.setSingleShot(True)
-        self._light_highlight_timer.setInterval(300)
+        self._light_highlight_timer.setInterval(1000)
         self._light_highlight_timer.timeout.connect(self._trigger_light_highlight)
 
         self._heavy_highlight_timer = QTimer(self)
@@ -214,7 +215,9 @@ class CodeEditor(QPlainTextEdit):
             and event.key() == Qt.Key.Key_Space
         ):
             cursor = self.textCursor()
-            self.completion_requested.emit(cursor.blockNumber(), cursor.columnNumber())
+            self.completion_requested.emit(
+                cursor.blockNumber(), cursor.positionInBlock()
+            )
             return
 
         if (
@@ -222,7 +225,9 @@ class CodeEditor(QPlainTextEdit):
             and event.key() == Qt.Key.Key_Return
         ):
             cursor = self.textCursor()
-            self.quick_fix_requested.emit(cursor.blockNumber(), cursor.columnNumber())
+            self.quick_fix_requested.emit(
+                cursor.blockNumber(), cursor.positionInBlock()
+            )
             return
 
         if (

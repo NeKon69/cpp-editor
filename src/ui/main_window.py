@@ -10,11 +10,9 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QFileDialog,
     QStatusBar,
-    QMenuBar,
 )
 
 from src.common.vars import log
-from src.common.process_runner import ProcessRunner
 from src.configs.editor_config import EditorConfig
 from src.configs.build_config import BuildConfig
 from src.editor.editor_widget import CodeEditor
@@ -39,6 +37,10 @@ class MainWindow(QMainWindow):
         self._build_helper = BuildHelper(project_path)
 
         self._theme_picker = None
+        self._bg_settings = None
+        self._bg_enabled = True
+        self._bg_opacity = 200
+        self._bg_brightness = 0.6
 
         self._setup_window()
         self._setup_lsp()
@@ -66,34 +68,55 @@ class MainWindow(QMainWindow):
             log(f"failed to initialize lsp: {e}")
 
     def _setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        from src.ui.shader_bg import OpenGLBackground
 
-        main_layout = QVBoxLayout(central_widget)
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._bg = OpenGLBackground(container)
+        self._bg.set_brightness(self._bg_brightness)
+        self._bg.setGeometry(0, 0, self.width(), self.height())
+        self._bg.lower()
+
+        main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
         main_splitter = QSplitter(Qt.Orientation.Vertical)
         main_splitter.setHandleWidth(1)
+        main_splitter.setStyleSheet("QSplitter { background: transparent; }")
 
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
         h_splitter.setHandleWidth(1)
+        h_splitter.setStyleSheet("QSplitter { background: transparent; }")
 
         self._file_tree = FileTree(self._project_path)
         self._file_tree.file_selected.connect(self._on_file_selected)
         self._file_tree.setMinimumWidth(200)
         self._file_tree.setMaximumWidth(400)
+        self._update_widget_style(self._file_tree)
 
         v_splitter = QSplitter(Qt.Orientation.Vertical)
         v_splitter.setHandleWidth(1)
+        v_splitter.setStyleSheet("QSplitter { background: transparent; }")
 
         self._editor = CodeEditor(self._editor_config)
         self._editor.set_project_path(self._project_path)
         self._editor.set_colors(self._editor_config.colors)
+        self._update_widget_style(self._editor, is_editor=True)
 
         self._diagnostics_panel = DiagnosticsPanel()
         self._diagnostics_panel.diagnostic_clicked.connect(self._on_diagnostic_clicked)
         self._diagnostics_panel.hide()
+        self._update_widget_style(self._diagnostics_panel, bg_color="40, 40, 40")
 
         v_splitter.addWidget(self._editor)
         v_splitter.addWidget(self._diagnostics_panel)
@@ -109,6 +132,7 @@ class MainWindow(QMainWindow):
         self._terminal.set_working_dir(self._project_path)
         self._terminal.setMaximumHeight(1000)
         self._terminal.hide()
+        self._update_widget_style(self._terminal)
 
         main_splitter.addWidget(h_splitter)
         main_splitter.addWidget(self._terminal)
@@ -116,6 +140,70 @@ class MainWindow(QMainWindow):
         main_splitter.setStretchFactor(1, 0)
 
         main_layout.addWidget(main_splitter)
+
+        overlay_widget = QWidget(container)
+        overlay_widget.setLayout(main_layout)
+        overlay_widget.setStyleSheet("background: transparent;")
+        overlay_widget.setGeometry(0, 0, self.width(), self.height())
+        overlay_widget.raise_()
+
+        self._overlay = overlay_widget
+
+        central_layout.addWidget(container)
+
+    def _update_widget_style(self, widget, bg_color="30, 30, 30", is_editor=False):
+        if self._bg_enabled:
+            if is_editor:
+                widget.setStyleSheet(
+                    f"""
+                    QPlainTextEdit {{
+                        background-color: rgba({bg_color}, {self._bg_opacity});
+                        border: none;
+                    }}
+                """
+                )
+            else:
+                widget.setStyleSheet(
+                    f"""
+                    QTreeView {{
+                        background-color: rgba({bg_color}, {self._bg_opacity});
+                        color: #d4d4d4;
+                        border: none;
+                    }}
+                    QTreeView::item:selected {{
+                        background-color: rgba(60, 60, 60, {self._bg_opacity});
+                    }}
+                    QWidget {{
+                        background-color: rgba({bg_color}, {self._bg_opacity});
+                    }}
+                """
+                )
+        else:
+            if is_editor:
+                widget.setStyleSheet(
+                    f"""
+                    QPlainTextEdit {{
+                        background-color: rgb({bg_color});
+                        border: none;
+                    }}
+                """
+                )
+            else:
+                widget.setStyleSheet(
+                    f"""
+                    QTreeView {{
+                        background-color: rgb({bg_color});
+                        color: #d4d4d4;
+                        border: none;
+                    }}
+                    QTreeView::item:selected {{
+                        background-color: rgb(60, 60, 60);
+                    }}
+                    QWidget {{
+                        background-color: rgb({bg_color});
+                    }}
+                """
+                )
 
     def _setup_menubar(self):
         menubar = self.menuBar()
@@ -166,6 +254,12 @@ class MainWindow(QMainWindow):
         theme_action = QAction("Syntax Highlighting Colors", self)
         theme_action.triggered.connect(self._open_theme_picker)
         view_menu.addAction(theme_action)
+
+        view_menu.addSeparator()
+
+        bg_settings_action = QAction("Background Settings", self)
+        bg_settings_action.triggered.connect(self._open_bg_settings)
+        view_menu.addAction(bg_settings_action)
 
         build_menu = menubar.addMenu("Build")
 
@@ -311,7 +405,7 @@ class MainWindow(QMainWindow):
     def _process_lsp_events(self):
         try:
             self._lsp_integration.process_events()
-        except Exception as e:
+        except Exception:
             pass
 
     def _open_project(self):
@@ -335,7 +429,10 @@ class MainWindow(QMainWindow):
 
     def _open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open File", str(self._project_path), "All Files (*)"
+            self,
+            "Open File",
+            str(self._project_path),
+            "C++ Files (*.cpp *.h *.hpp *.c *.cc *.cxx *.hxx)",
         )
 
         if file_path:
@@ -378,6 +475,32 @@ class MainWindow(QMainWindow):
         self._editor_config.save()
         self._editor.set_colors(colors)
 
+    def _open_bg_settings(self):
+        from src.ui.bg_settings import BackgroundSettings
+
+        if not self._bg_settings:
+            self._bg_settings = BackgroundSettings(
+                self._bg_enabled, self._bg_opacity, self._bg_brightness, self
+            )
+            self._bg_settings.settings_changed.connect(self._on_bg_settings_changed)
+        self._bg_settings.show()
+
+    def _on_bg_settings_changed(self, enabled: bool, opacity: int, brightness: float):
+        self._bg_enabled = enabled
+        self._bg_opacity = opacity
+        self._bg_brightness = brightness
+
+        if enabled:
+            self._bg.show()
+            self._bg.set_brightness(brightness)
+        else:
+            self._bg.hide()
+
+        self._update_widget_style(self._file_tree)
+        self._update_widget_style(self._editor, is_editor=True)
+        self._update_widget_style(self._diagnostics_panel, bg_color="40, 40, 40")
+        self._update_widget_style(self._terminal)
+
     def _open_build_settings(self):
         try:
             settings_dialog = BuildConfig(self._build_helper, self)
@@ -389,10 +512,8 @@ class MainWindow(QMainWindow):
 
     def _build_project(self):
         self._terminal.show()
-
         build_cmd = self._build_helper.get_build_command()
         self._terminal.execute_command(build_cmd)
-
         self._statusbar.showMessage("Building...")
 
     def _run_project(self):
@@ -403,46 +524,21 @@ class MainWindow(QMainWindow):
         self._terminal.execute_command(combined_cmd)
         self._statusbar.showMessage("Running...")
 
-    @pyqtSlot(str)
-    def _on_process_output(self, text: str):
-        try:
-            if text.strip():
-                self._terminal.append_text(text.rstrip())
-        except Exception as e:
-            log(f"error in process output: {e}")
-
-    @pyqtSlot(str)
-    def _on_process_error(self, error: str):
-        try:
-            self._terminal.append_text(error, error=True)
-        except Exception as e:
-            log(f"error in process error: {e}")
-
-    @pyqtSlot(int)
-    def _on_process_finished(self, exit_code: int):
-        try:
-            if exit_code == 0:
-                self._statusbar.showMessage("Finished successfully")
-                self._terminal.append_text("\n✓ Process finished successfully")
-            else:
-                self._statusbar.showMessage(f"Failed with exit code {exit_code}")
-                self._terminal.append_text(
-                    f"\n✗ Process failed with exit code {exit_code}", error=True
-                )
-        except Exception as e:
-            log(f"error in process finished: {e}")
-
     def _open_git(self):
         try:
             GitHelper.open_lazygit(self._project_path)
         except Exception as e:
             log(f"failed to open git: {e}")
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_bg"):
+            self._bg.setGeometry(0, 0, self.width(), self.height())
+        if hasattr(self, "_overlay"):
+            self._overlay.setGeometry(0, 0, self.width(), self.height())
+
     def closeEvent(self, event):
         try:
-            if self._process_runner and self._process_runner.isRunning():
-                self._process_runner.stop()
-
             if self._current_file:
                 supported_extensions = {
                     ".cpp",

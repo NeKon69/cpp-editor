@@ -1,9 +1,13 @@
-from PyQt6.QtCore import QThread, pyqtSignal
+import shutil
 import subprocess
-import shlex
 from pathlib import Path
-
+from typing import Optional
+from PyQt6.QtCore import QThread, pyqtSignal
 from src.common.vars import log
+
+
+def find_executable(name: str) -> Optional[str]:
+    return shutil.which(name)
 
 
 class ProcessRunner(QThread):
@@ -13,7 +17,6 @@ class ProcessRunner(QThread):
 
     def __init__(self, command: str, cwd: Path = None):
         super().__init__()
-
         self.command = command
         self.cwd = cwd or Path.cwd()
         self.process = None

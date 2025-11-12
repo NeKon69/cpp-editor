@@ -76,6 +76,9 @@ class LspIntegration(QObject):
 
     def request_completion(self, path: Path, line: int, character: int):
         try:
+            uri = path.as_uri()
+            log(f"lsp_integration: request {path.name} line={line} char={character}")
+
             completion_list = self._session.get_completion(str(path), line, character)
 
             items = []
@@ -84,6 +87,9 @@ class LspIntegration(QObject):
                 and hasattr(completion_list, "items")
                 and completion_list.items
             ):
+                log(
+                    f"lsp_integration: clangd returned {len(completion_list.items)} items"
+                )
                 for item in completion_list.items:
                     items.append(
                         {
@@ -97,12 +103,18 @@ class LspIntegration(QObject):
                             "filter_text": getattr(item, "filter_text", item.label),
                         }
                     )
+            else:
+                log(f"lsp_integration: empty or no completion_list")
 
+            log(f"lsp_integration: emitting {len(items)} items")
             self.completion_ready.emit(items)
 
         except Exception as e:
-            log(f"lsp: failed to request completion: {e}")
-            self.completion_ready.emit([])
+            log(f"lsp_integration: error {e}")
+            import traceback
+
+            log(traceback.format_exc())
+        self.completion_ready.emit([])
 
     def request_hover(self, path: Path, line: int, character: int):
         try:
