@@ -18,7 +18,7 @@ class LspIntegration(QObject):
 
         self._session = session
         self._opened_files: Dict[str, Path] = {}
-        self._last_file_uri: str = None
+        self._last_file_uri: Optional[str] = None
         self._diagnostics_cache: Dict[str, str] = {}
         self._processing = False
 
@@ -77,7 +77,7 @@ class LspIntegration(QObject):
     def request_completion(self, path: Path, line: int, character: int):
         try:
             uri = path.as_uri()
-            log(f"lsp_integration: request {path.name} line={line} char={character}")
+            log(f"lsp_integration: request {uri} line={line} char={character}")
 
             completion_list = self._session.get_completion(str(path), line, character)
 
@@ -115,37 +115,6 @@ class LspIntegration(QObject):
 
             log(traceback.format_exc())
         self.completion_ready.emit([])
-
-    def request_hover(self, path: Path, line: int, character: int):
-        try:
-            hover = self._session.get_hover(str(path), line, character)
-
-            content = ""
-            if hover:
-                if isinstance(hover, str):
-                    content = hover
-                elif hasattr(hover, "value"):
-                    content = hover.value
-                else:
-                    content = str(hover)
-
-            self.hover_ready.emit(content)
-
-        except Exception as e:
-            log(f"lsp: failed to request hover: {e}")
-            self.hover_ready.emit("")
-
-    def format_document(self, path: Path):
-        try:
-            result = self._session.format_document(str(path))
-            if result:
-                log(f"lsp: formatted {path}")
-                return True
-
-        except Exception as e:
-            log(f"lsp: failed to request formatting: {e}")
-
-        return False
 
     def process_events(self):
         if self._processing:
@@ -228,36 +197,6 @@ class LspIntegration(QObject):
 
         finally:
             self._processing = False
-
-    def request_code_actions(
-        self, path: Path, line: int, character: int, message: str = None
-    ):
-        try:
-            code_actions = self._session.get_code_actions(str(path), line, character)
-            if code_actions and len(code_actions) > 0:
-                action = code_actions[0]
-                if hasattr(action, "edit") and action.edit:
-                    changes = action.edit.get("changes", {})
-                    for uri, edits in changes.items():
-                        edits_list = []
-                        for edit in edits:
-                            edits_list.append(
-                                {
-                                    "line": edit["range"]["start"]["line"],
-                                    "character": edit["range"]["start"]["character"],
-                                    "end_line": edit["range"]["end"]["line"],
-                                    "end_character": edit["range"]["end"]["character"],
-                                    "new_text": edit.get("newText", ""),
-                                }
-                            )
-                        self.code_actions_ready.emit(edits_list)
-                else:
-                    log(f"lsp: code action has no edit")
-            else:
-                log(f"lsp: no code actions available at {line}:{character}")
-
-        except Exception as e:
-            log(f"lsp: failed to request code actions: {e}")
 
     def format_document_in_memory(self, path: Path) -> Optional[List[Dict[str, Any]]]:
         try:

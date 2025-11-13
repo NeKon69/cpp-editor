@@ -23,11 +23,11 @@ from src.lsp_server.session import LspSession
 from src.ui.file_tree import FileTree
 from src.ui.diagnostics_panel import DiagnosticsPanel
 from src.ui.terminal_widget import TerminalWidget
-from src.ui.build_settings import BuildSettings
 from src.utils.git_helper import GitHelper
 
 
 class MainWindow(QMainWindow):
+
     def __init__(self, project_path: Path):
         super().__init__()
 
@@ -49,6 +49,15 @@ class MainWindow(QMainWindow):
         self._setup_editor()
         self._setup_statusbar()
         self._setup_timers()
+        QTimer.singleShot(100, self._init_completer)
+
+    def _init_completer(self):
+        from src.editor.completer import LspCompleter
+
+        self._completer = LspCompleter(self._editor)
+        self._lsp_integration.completion_ready.connect(
+            self._completer.update_completions
+        )
 
     def _setup_window(self):
         self.setWindowTitle(f"C++ Editor - {self._project_path.name}")
@@ -285,17 +294,18 @@ class MainWindow(QMainWindow):
         git_menu.addAction(lazygit_action)
 
     def _setup_editor(self):
-        self._completer = LspCompleter(self._editor)
-
         self._editor.text_changed.connect(self._on_text_changed)
         self._editor.cursor_position_changed.connect(self._on_cursor_changed)
         self._editor.completion_requested.connect(self._on_completion_requested)
+
         self._editor.quick_fix_requested.connect(self._on_quick_fix_requested)
         self._editor.format_requested.connect(self._format_document)
 
         self._lsp_integration.completion_ready.connect(self._on_completion_ready)
         self._lsp_integration.hover_ready.connect(self._on_hover_ready)
         self._lsp_integration.diagnostics_updated.connect(self._on_diagnostics_updated)
+
+        self._completer = None
 
     def _setup_statusbar(self):
         self._statusbar = QStatusBar()
@@ -372,7 +382,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(list)
     def _on_completion_ready(self, completions: list):
-        self._completer.update_completions(completions)
+        if self._completer:
+            self._completer.update_completions(completions)
 
     @pyqtSlot(str)
     def _on_hover_ready(self, content: str):

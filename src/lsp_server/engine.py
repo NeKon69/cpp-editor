@@ -4,15 +4,17 @@ from pathlib import Path
 from collections import deque
 import queue
 import sansio_lsp_client as lsp
+from src.common.opened_file import OpenedFile
 from src.common.vars import log
 from src.lsp_server.process import ClangdProcess
+from typing import Dict
 
 
 class LspEngine:
     def __init__(self, project_path: str, config):
         self.project_path = Path(project_path).resolve()
         self.config = config
-        self.opened_files = dict()
+        self.opened_files: Dict[str, OpenedFile] = dict()
         self.diagnostics = dict()
         self.responses = dict()
         self._response_lock = threading.Lock()
@@ -86,7 +88,6 @@ class LspEngine:
 
     def initialize_handshake(self):
         self._send()
-        log("Waiting for 'initialize' response...")
         initialized = False
         start_time = time.monotonic()
         while not initialized and time.monotonic() - start_time < 10.0:
@@ -98,7 +99,6 @@ class LspEngine:
         if not initialized:
             raise RuntimeError("LSP server initialization failed or timed out.")
         self._send()
-        log("LSP session initialized successfully.")
 
     def handle_event(self, event):
         if isinstance(event, lsp.PublishDiagnostics):

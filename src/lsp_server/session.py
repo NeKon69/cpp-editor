@@ -164,93 +164,7 @@ class LspSession:
                 log(f"session: no completion_list in response")
         else:
             log(f"session: response is not Completion")
-        return None
 
-    def goto_definition(self, file_path: str, line: int, character: int):
-        return self._goto_location(
-            file_path,
-            line,
-            character,
-            self.engine.lsp_client.definition,
-            lsp.Definition,
-        )
-
-    def goto_declaration(self, file_path: str, line: int, character: int):
-        return self._goto_location(
-            file_path,
-            line,
-            character,
-            self.engine.lsp_client.declaration,
-            lsp.Declaration,
-        )
-
-    def goto_implementation(self, file_path: str, line: int, character: int):
-        return self._goto_location(
-            file_path,
-            line,
-            character,
-            self.engine.lsp_client.implementation,
-            lsp.Implementation,
-        )
-
-    def goto_type_definition(self, file_path: str, line: int, character: int):
-        return self._goto_location(
-            file_path,
-            line,
-            character,
-            self.engine.lsp_client.typeDefinition,
-            lsp.TypeDefinition,
-        )
-
-    def _goto_location(
-        self, file_path: str, line: int, character: int, method, expected_type
-    ):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = method(
-            lsp.TextDocumentPosition(
-                textDocument=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=character),
-            )
-        )
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, expected_type):
-            return response.result
-        return None
-
-    def find_references(self, file_path: str, line: int, character: int):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = self.engine.lsp_client.references(
-            lsp.TextDocumentPosition(
-                textDocument=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=character),
-            )
-        )
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, lsp.References):
-            return response.result
-        return None
-
-    def rename_symbol(self, file_path: str, line: int, character: int, new_name: str):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = self.engine.lsp_client.rename(
-            lsp.TextDocumentPosition(
-                textDocument=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=character),
-            ),
-            new_name,
-        )
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, lsp.WorkspaceEdit):
-            return response
         return None
 
     def format_document(self, file_path: str) -> bool:
@@ -280,25 +194,6 @@ class LspSession:
             return True
         return False
 
-    def format_range(self, file_path: str, range_to_format: lsp.Range):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = self.engine.lsp_client.rangeFormatting(
-            lsp.TextDocumentIdentifier(uri=uri),
-            range_to_format,
-            lsp.FormattingOptions(tabSize=4, insertSpaces=True),
-        )
-        response = self._send_lsp_request(msg_id)
-        if (
-            response
-            and isinstance(response, lsp.DocumentFormatting)
-            and response.result
-        ):
-            return response.result
-        return None
-
     def get_hover(self, file_path: str, line: int, character: int):
         uri = self._resolve_uri(file_path)
         if not self._check_file_open(uri, file_path):
@@ -313,42 +208,6 @@ class LspSession:
         response = self._send_lsp_request(msg_id)
         if response and isinstance(response, lsp.Hover):
             return response.contents
-        return None
-
-    def get_signature_help(self, file_path: str, line: int, character: int):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = self.engine.lsp_client.signatureHelp(
-            lsp.TextDocumentPosition(
-                textDocument=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=character),
-            )
-        )
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, lsp.SignatureHelp):
-            return response
-        return None
-
-    def get_document_symbols(self, file_path: str):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        msg_id = self.engine.lsp_client.documentSymbol(
-            lsp.TextDocumentIdentifier(uri=uri)
-        )
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, lsp.MDocumentSymbols):
-            return response.result
-        return None
-
-    def search_workspace_symbols(self, query: str):
-        msg_id = self.engine.lsp_client.workspace_symbol(query)
-        response = self._send_lsp_request(msg_id)
-        if response and isinstance(response, lsp.MWorkspaceSymbols):
-            return response.result
         return None
 
     def get_diagnostics(self, file_path: Optional[str] = None) -> Dict[str, List]:

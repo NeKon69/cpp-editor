@@ -16,7 +16,7 @@ class PreprocessingResult(NamedTuple):
 
 
 class CppPreprocessor:
-    def __init__(self, project_path: Path, compiler: str = "g++"):
+    def __init__(self, project_path: Path, compiler: str = "clang++"):
         self.project_path = project_path
         self.compiler = compiler
         self._cache = {}
@@ -186,35 +186,27 @@ class CppPreprocessor:
         lines = preprocessed.split("\n")
         file_name = file_path.name
         log(
-            f"preprocessor: searching for cut point for '{file_name}' in {len(lines)} lines"
+            f"preprocessor: reverse-searching for cut point for '{file_name}' in {len(lines)} lines"
         )
 
-        pattern = re.compile(rf'^#\s+\d+\s+".*{re.escape(file_name)}"\s+2')
-        for i, line in enumerate(lines):
-            if pattern.match(line):
+        pattern_flag2 = re.compile(rf'^#\s+\d+\s+".*{re.escape(file_name)}"\s+2')
+        for i in range(len(lines) - 1, -1, -1):
+            if pattern_flag2.match(lines[i]):
                 log(
-                    f"preprocessor: found cut marker (with flag 2) at line {i}: {line[:80]}"
+                    f"preprocessor: found LAST cut marker (flag 2) at line {i}: {lines[i][:80]}"
                 )
                 return i
 
-        log("preprocessor: marker with flag 2 not found, trying without flag")
+        log("preprocessor: marker with flag 2 not found, trying without flag (reverse)")
         pattern_no_flag = re.compile(rf'^#\s+\d+\s+".*{re.escape(file_name)}"')
-        matches = [
-            (i, line) for i, line in enumerate(lines) if pattern_no_flag.match(line)
-        ]
+        for i in range(len(lines) - 1, -1, -1):
+            if pattern_no_flag.match(lines[i]):
+                log(
+                    f"preprocessor: found LAST marker (no flag) at line {i}: {lines[i][:80]}"
+                )
+                return i
 
-        if len(matches) > 1:
-            log(
-                f"preprocessor: found {len(matches)} markers, using last one at line {matches[-1][0]}"
-            )
-            return matches[-1][0]
-        elif len(matches) == 1:
-            log(
-                f"preprocessor: WARNING - found only 1 marker at line {matches[0][0]} (ambiguous)"
-            )
-            return -1
-
-        log(f"preprocessor: ERROR - no cut point markers found")
+        log("preprocessor: ERROR - no cut point markers found (even in reverse scan)")
         return -1
 
     def _extract_clean_header(self, preprocessed: str, cut_point: int) -> str:

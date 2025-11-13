@@ -1,46 +1,41 @@
 from typing import List, Dict, Any, Tuple
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QListWidget, QListWidgetItem
-from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent
+from PyQt6.QtWidgets import QMenu
+from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent, QAction
 from src.common.vars import log
 
 
-class LspCompleter(QListWidget):
+class LspCompleter(QMenu):
     def __init__(self, editor):
-        super().__init__(editor.parent())
+        super().__init__(editor)
         self._editor = editor
         self._completions: List[Dict[str, Any]] = []
         self._filtered: List[Dict[str, Any]] = []
         self._last_text_length = 0
+        self._actions: List[QAction] = []
 
         self._auto_timer = QTimer()
         self._auto_timer.setSingleShot(True)
         self._auto_timer.setInterval(1000)
         self._auto_timer.timeout.connect(self._auto_request)
 
-        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFont(QFont("monospace", 10))
-        self.setMinimumWidth(350)
-        self.setMaximumHeight(250)
+        self.setFixedWidth(350)
 
         self.setStyleSheet(
             """
-            QListWidget {
+            QMenu {
                 background-color: #2d2d2d;
                 color: #f8f8f2;
                 border: 1px solid #555;
             }
-            QListWidget::item:selected {
+            QMenu::item:selected {
                 background-color: #44475a;
             }
         """
         )
 
-        self.itemClicked.connect(self._apply_completion)
         self._editor.textChanged.connect(self._on_text_changed)
-
-        self.hide()
 
     def _extract_prefix(self) -> Tuple[str, str]:
         cursor = self._editor.textCursor()
@@ -109,24 +104,25 @@ class LspCompleter(QListWidget):
         ) + sorted(other_match, key=lambda x: self._get_base_name(x["label"]).lower())
 
         self.clear()
+        self._actions = []
+
         for comp in self._filtered:
             detail = comp.get("detail", "")
             label = comp["label"]
             display = f"{label}  {detail}" if detail else label
-            item = QListWidgetItem(display)
+            action = QAction(display, self)
             clean_label = self._clean_label(label)
-            item.setData(Qt.ItemDataRole.UserRole, clean_label)
-            self.addItem(item)
+            action.setData(clean_label)
+            action.triggered.connect(
+                lambda checked=False, a=action: self._apply_completion(a)
+            )
+            self.addAction(action)
+            self._actions.append(action)
 
         if self._filtered:
             rect = self._editor.cursorRect()
             global_pos = self._editor.mapToGlobal(rect.bottomLeft())
-            self.move(global_pos)
-            self.resize(350, min(250, self.count() * 25))
-            self.show()
-            self.raise_()
-            self.activateWindow()
-            self.setCurrentRow(0)
+            self.popup(global_pos)
         else:
             self.hide()
 
@@ -155,8 +151,8 @@ class LspCompleter(QListWidget):
         else:
             self.hide()
 
-    def _apply_completion(self, item: QListWidgetItem):
-        label = item.data(Qt.ItemDataRole.UserRole)
+    def _apply_completion(self, action: QAction):
+        label = action.data()
         cursor = self._editor.textCursor()
 
         full_prefix, filter_prefix = self._extract_prefix()
@@ -174,14 +170,11 @@ class LspCompleter(QListWidget):
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self.currentItem():
-                self._apply_completion(self.currentItem())
+            if self.activeAction():
+                self.activeAction().trigger()
             return
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
             return
-        elif event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
-            super().keyPressEvent(event)
-            return
 
-        self._editor.keyPressEvent(event)
+        super().keyPressEvent(event)
