@@ -196,6 +196,7 @@ class TreeSitterWorker(QObject):
     ; Keywords
     [
       "catch"
+      "decltype"
       "class"
       "co_await"
       "co_return"

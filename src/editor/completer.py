@@ -1,41 +1,64 @@
 from typing import List, Dict, Any, Tuple
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QMenu
-from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent, QAction
+from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem
+from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent
 from src.common.vars import log
+import time
 
 
-class LspCompleter(QMenu):
+class LspCompleter(QWidget):
     def __init__(self, editor):
-        super().__init__(editor)
+        super().__init__(
+            None,
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+
         self._editor = editor
         self._completions: List[Dict[str, Any]] = []
         self._filtered: List[Dict[str, Any]] = []
         self._last_text_length = 0
-        self._actions: List[QAction] = []
 
-        self._auto_timer = QTimer()
-        self._auto_timer.setSingleShot(True)
-        self._auto_timer.setInterval(1000)
-        self._auto_timer.timeout.connect(self._auto_request)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        self.setFont(QFont("monospace", 10))
-        self.setFixedWidth(350)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        self.setStyleSheet(
+        self._list = QListWidget()
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._list.setFont(QFont("monospace", 10))
+        self._list.setStyleSheet(
             """
-            QMenu {
+            QListWidget {
                 background-color: #2d2d2d;
                 color: #f8f8f2;
                 border: 1px solid #555;
             }
-            QMenu::item:selected {
+            QListWidget::item:selected {
                 background-color: #44475a;
             }
         """
         )
+        self._list.itemClicked.connect(self._apply_completion)
+
+        layout.addWidget(self._list)
+
+        self.setFixedWidth(350)
+        self.setMaximumHeight(250)
+
+        self._auto_timer = QTimer()
+        self._auto_timer.setSingleShot(True)
+        self._auto_timer.setInterval(300)
+        self._auto_timer.timeout.connect(self._auto_request)
 
         self._editor.textChanged.connect(self._on_text_changed)
+        self._editor.installEventFilter(self)
+
+        self.hide()
 
     def _extract_prefix(self) -> Tuple[str, str]:
         cursor = self._editor.textCursor()
@@ -61,6 +84,41 @@ class LspCompleter(QMenu):
 
         return full_prefix, filter_prefix
 
+    def eventFilter(self, obj, event):
+        if obj == self._editor and event.type() == event.Type.KeyPress:
+            if self.isVisible():
+                key = event.key()
+
+                if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    self._list.keyPressEvent(event)
+                    return True
+                elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    current = self._list.currentItem()
+                    if current:
+                        self._apply_completion(current)
+                    return True
+                elif key == Qt.Key.Key_Escape:
+                    self.hide()
+                    return True
+                elif key in (
+                    Qt.Key.Key_Space,
+                    Qt.Key.Key_Semicolon,
+                    Qt.Key.Key_ParenLeft,
+                    Qt.Key.Key_ParenRight,
+                    Qt.Key.Key_BracketLeft,
+                    Qt.Key.Key_BracketRight,
+                    Qt.Key.Key_BraceLeft,
+                    Qt.Key.Key_BraceRight,
+                    Qt.Key.Key_Comma,
+                    Qt.Key.Key_Period,
+                    Qt.Key.Key_Less,
+                    Qt.Key.Key_Greater,
+                ):
+                    self.hide()
+                    return False
+
+        return super().eventFilter(obj, event)
+
     def _on_text_changed(self):
         self._auto_timer.stop()
 
@@ -68,15 +126,25 @@ class LspCompleter(QMenu):
         text_added = current_length > self._last_text_length
         self._last_text_length = current_length
 
-        if self.isVisible():
-            self._filter_and_show()
-        elif text_added:
-            cursor = self._editor.textCursor()
-            block = cursor.block().text()
-            pos = cursor.positionInBlock()
+        cursor = self._editor.textCursor()
+        block = cursor.block().text()
+        pos = cursor.positionInBlock()
 
-            if pos > 0 and block[:pos].strip():
+        if pos > 0:
+            last_char = block[pos - 1]
+            if last_char in " ;,()[]{}.<>\n\t":
+                if self.isVisible():
+                    self.hide()
+                return
+
+        if self.isVisible():
+            if text_added:
                 self._auto_timer.start()
+            else:
+                if self._completions:
+                    self._filter_and_show()
+        elif text_added and pos > 0 and block[:pos].strip():
+            self._auto_timer.start()
 
     def _filter_and_show(self):
         full_prefix, filter_prefix = self._extract_prefix()
@@ -103,26 +171,44 @@ class LspCompleter(QMenu):
             start_match, key=lambda x: self._get_base_name(x["label"]).lower()
         ) + sorted(other_match, key=lambda x: self._get_base_name(x["label"]).lower())
 
-        self.clear()
-        self._actions = []
-
+        self._list.clear()
         for comp in self._filtered:
             detail = comp.get("detail", "")
             label = comp["label"]
             display = f"{label}  {detail}" if detail else label
-            action = QAction(display, self)
+            item = QListWidgetItem(display)
             clean_label = self._clean_label(label)
-            action.setData(clean_label)
-            action.triggered.connect(
-                lambda checked=False, a=action: self._apply_completion(a)
-            )
-            self.addAction(action)
-            self._actions.append(action)
+            item.setData(Qt.ItemDataRole.UserRole, clean_label)
+            self._list.addItem(item)
 
         if self._filtered:
+            height = min(250, max(50, self._list.count() * 25))
+            self.setFixedHeight(height)
+
             rect = self._editor.cursorRect()
             global_pos = self._editor.mapToGlobal(rect.bottomLeft())
-            self.popup(global_pos)
+
+            from PyQt6.QtGui import QGuiApplication
+
+            screen = QGuiApplication.primaryScreen()
+            if screen:
+                screen_geom = screen.availableGeometry()
+
+                if global_pos.x() < 0 or global_pos.x() > screen_geom.width() - 350:
+                    global_pos.setX(
+                        max(0, min(global_pos.x(), screen_geom.width() - 350))
+                    )
+
+                if global_pos.y() < 0 or global_pos.y() > screen_geom.height() - height:
+                    global_pos.setY(
+                        max(0, min(global_pos.y(), screen_geom.height() - height))
+                    )
+
+            self.move(global_pos)
+            self._list.setCurrentRow(0)
+
+            self.show()
+            self.raise_()
         else:
             self.hide()
 
@@ -146,13 +232,12 @@ class LspCompleter(QMenu):
 
     def update_completions(self, items: List[Dict[str, Any]]):
         self._completions = items
+
         if items:
             self._filter_and_show()
-        else:
-            self.hide()
 
-    def _apply_completion(self, action: QAction):
-        label = action.data()
+    def _apply_completion(self, item: QListWidgetItem):
+        label = item.data(Qt.ItemDataRole.UserRole)
         cursor = self._editor.textCursor()
 
         full_prefix, filter_prefix = self._extract_prefix()
@@ -169,12 +254,4 @@ class LspCompleter(QMenu):
         self.hide()
 
     def keyPressEvent(self, event: QKeyEvent):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self.activeAction():
-                self.activeAction().trigger()
-            return
-        elif event.key() == Qt.Key.Key_Escape:
-            self.hide()
-            return
-
-        super().keyPressEvent(event)
+        self._editor.keyPressEvent(event)

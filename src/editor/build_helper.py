@@ -9,8 +9,7 @@ from src.common.vars import log
 class BuildHelper:
     def __init__(self, project_path: Path):
         self.project_path = project_path
-        self.build_dir = project_path / "build"
-        self.compile_commands_path = self.build_dir / "compile_commands.json"
+        self.compile_commands_path = project_path / "compile_commands.json"
         self.db_path = project_path / ".build_settings.sqlite"
         self._init_db()
 
