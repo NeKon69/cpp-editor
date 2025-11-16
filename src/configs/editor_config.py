@@ -68,31 +68,34 @@ class EditorConfig:
     font_size: int = 11
     tab_width: int = 4
     colors: EditorColors = field(default_factory=EditorColors)
+    active_theme: str = ""
 
     @classmethod
-    def load(cls, path: Path = Path.home() / ".cpp_editor_config.json"):
-        if path.exists():
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-                colors_data = data.pop("colors", {})
-                return cls(**data, colors=EditorColors.from_dict(colors_data))
-            except Exception:
-                return cls()
-        return cls()
+    def load(cls, global_db):
+        font_family = global_db.get_setting("font_family") or "Fira Code"
+        font_size = int(global_db.get_setting("font_size") or "11")
+        tab_width = int(global_db.get_setting("tab_width") or "4")
+        active_theme = global_db.get_setting("active_theme") or ""
 
-    def save(self, path: Path = Path.home() / ".cpp_editor_config.json"):
+        colors = EditorColors()
+        if active_theme:
+            theme_data = global_db.load_theme(active_theme)
+            if theme_data:
+                colors = EditorColors.from_dict(theme_data)
+
+        return cls(
+            font_family=font_family,
+            font_size=font_size,
+            tab_width=tab_width,
+            colors=colors,
+            active_theme=active_theme,
+        )
+
+    def save(self, global_db):
         try:
-            with open(path, "w") as f:
-                json.dump(
-                    {
-                        "font_family": self.font_family,
-                        "font_size": self.font_size,
-                        "tab_width": self.tab_width,
-                        "colors": self.colors.to_dict(),
-                    },
-                    f,
-                    indent=2,
-                )
+            global_db.set_setting("font_family", self.font_family)
+            global_db.set_setting("font_size", str(self.font_size))
+            global_db.set_setting("tab_width", str(self.tab_width))
+            global_db.set_setting("active_theme", self.active_theme)
         except Exception as e:
             print(f"Failed to save config: {e}")

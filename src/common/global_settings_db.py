@@ -3,15 +3,14 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Optional
+import json
 
-from src.configs.editor_config import EditorColors
 
-
-class ColorDatabase:
+class GlobalSettingsDB:
     def __init__(self):
         self.db_path = self._get_db_path()
         self.conn = sqlite3.connect(self.db_path)
-        self._create_table()
+        self._create_tables()
 
     def _get_db_path(self) -> Path:
         if sys.platform.startswith("win"):
@@ -25,15 +24,23 @@ class ColorDatabase:
             )
             appdir = base_dir / "cpp_editor"
         appdir.mkdir(parents=True, exist_ok=True)
-        return appdir / "themes.sqlite"
+        return appdir / "global_settings.sqlite"
 
-    def _create_table(self):
+    def _create_tables(self):
         with self.conn:
             self.conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS themes (
                     name TEXT PRIMARY KEY,
                     data TEXT NOT NULL
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS global_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
                 """
             )
@@ -47,8 +54,6 @@ class ColorDatabase:
         row = cursor.fetchone()
         if not row:
             return None
-        import json
-
         try:
             data = json.loads(row[0])
             return data
@@ -56,8 +61,6 @@ class ColorDatabase:
             return None
 
     def save_theme(self, name: str, colors_dict: dict):
-        import json
-
         data_json = json.dumps(colors_dict)
         with self.conn:
             self.conn.execute(
@@ -71,3 +74,24 @@ class ColorDatabase:
     def delete_theme(self, name: str):
         with self.conn:
             self.conn.execute("DELETE FROM themes WHERE name = ?", (name,))
+
+    def get_setting(self, key: str) -> Optional[str]:
+        cursor = self.conn.execute(
+            "SELECT value FROM global_settings WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str):
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO global_settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (key, value),
+            )
+
+    def delete_setting(self, key: str):
+        with self.conn:
+            self.conn.execute("DELETE FROM global_settings WHERE key = ?", (key,))

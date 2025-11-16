@@ -16,18 +16,17 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor
 
 from src.configs.editor_config import EditorColors
-from src.common.color_database import ColorDatabase
 
 
 class ThemePicker(QDialog):
-    colors_changed = pyqtSignal(EditorColors)
+    colors_changed = pyqtSignal(EditorColors, str)
 
-    def __init__(self, current_colors: EditorColors, parent=None):
+    def __init__(self, current_colors: EditorColors, global_db, parent=None):
         super().__init__(parent)
 
         self._colors = EditorColors(**current_colors.to_dict())
         self._color_buttons = {}
-        self._db = ColorDatabase()
+        self._db = global_db
 
         self.setWindowTitle("Theme Editor")
         self.setGeometry(100, 100, 700, 600)
@@ -220,8 +219,14 @@ class ThemePicker(QDialog):
             button.setText(color)
 
     def _apply_colors(self):
-        self.colors_changed.emit(self._colors)
+        theme_name = self._theme_combo.currentText()
+        self.colors_changed.emit(self._colors, theme_name)
         self.accept()
 
     def get_colors(self) -> EditorColors:
         return self._colors
+
+    def set_current_theme(self, theme_name: str):
+        index = self._theme_combo.findText(theme_name)
+        if index >= 0:
+            self._theme_combo.setCurrentIndex(index)

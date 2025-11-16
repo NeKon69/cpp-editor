@@ -4,7 +4,7 @@ from PyQt6.QtCore import QTimer, QSize
 from PyQt6.QtWidgets import QMainWindow, QFileDialog
 
 from src.common.vars import log
-from src.configs.build_config import BuildConfig
+from src.configs.build_config import BuildHelper
 from src.ui.main_front import MainFront
 from src.ui.main_back import MainBack
 
@@ -142,19 +142,20 @@ class MainWindow(QMainWindow):
 
         if not self._theme_picker:
             editor_config = self._back.get_editor_config()
-            self._theme_picker = ThemePicker(editor_config.colors, self)
+            global_db = self._back.get_global_db()
+            self._theme_picker = ThemePicker(editor_config.colors, global_db, self)
             self._theme_picker.colors_changed.connect(self._on_colors_changed)
 
         editor_config = self._back.get_editor_config()
-        self._theme_picker._theme_combo.setCurrentText(
-            editor_config.colors.to_dict().get("name", "")
-        )
+        self._theme_picker.set_current_theme(editor_config.active_theme)
         self._theme_picker.show()
 
-    def _on_colors_changed(self, colors):
+    def _on_colors_changed(self, colors, theme_name):
         editor_config = self._back.get_editor_config()
         editor_config.colors = colors
-        editor_config.save()
+        editor_config.active_theme = theme_name
+        global_db = self._back.get_global_db()
+        editor_config.save(global_db)
         self._front.update_colors(colors)
 
     def _open_bg_settings(self):

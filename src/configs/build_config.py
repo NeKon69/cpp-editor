@@ -1,51 +1,27 @@
-from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QFormLayout,
-    QLineEdit,
-    QPushButton,
-    QHBoxLayout,
-)
+from pathlib import Path
+from typing import List
+import json
+
+from src.common.vars import log
+from src.common.project_settings_db import ProjectSettingsDB
 
 
-class BuildConfig(QDialog):
-    def __init__(self, build_helper, parent=None):
-        super().__init__(parent)
-        self._build_helper = build_helper
-        self.setWindowTitle("Build Settings")
-        self.setMinimumWidth(500)
-        self._setup_ui()
+class BuildHelper:
+    def __init__(self, project_path: Path):
+        self.project_path = project_path
+        self.compile_commands_path = project_path / "compile_commands.json"
+        self._db = ProjectSettingsDB(project_path)
 
-    def _setup_ui(self):
-        layout = QVBoxLayout()
+    def get_build_command(self) -> str:
+        return self._db.get_setting(
+            "build_command", "cmake -B build && cmake --build build"
+        )
 
-        form_layout = QFormLayout()
+    def get_run_command(self) -> str:
+        return self._db.get_setting("run_command", "./build/app")
 
-        self._build_cmd_edit = QLineEdit()
-        self._build_cmd_edit.setText(self._build_helper.get_build_command())
-        form_layout.addRow("Build Command:", self._build_cmd_edit)
+    def set_build_command(self, command: str):
+        self._db.set_setting("build_command", command)
 
-        self._run_cmd_edit = QLineEdit()
-        self._run_cmd_edit.setText(self._build_helper.get_run_command())
-        form_layout.addRow("Run Command:", self._run_cmd_edit)
-
-        layout.addLayout(form_layout)
-
-        button_layout = QHBoxLayout()
-
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self._save)
-        button_layout.addWidget(save_button)
-
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_button)
-
-        layout.addLayout(button_layout)
-
-        self.setLayout(layout)
-
-    def _save(self):
-        self._build_helper.set_build_command(self._build_cmd_edit.text())
-        self._build_helper.set_run_command(self._run_cmd_edit.text())
-        self.accept()
+    def set_run_command(self, command: str):
+        self._db.set_setting("run_command", command)

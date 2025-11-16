@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem
 from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent
@@ -10,14 +10,12 @@ class LspCompleter(QWidget):
             None,
             Qt.WindowType.ToolTip
             | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.WindowDoesNotAcceptFocus,
+            | Qt.WindowType.WindowStaysOnTopHint,
         )
 
         self._editor = editor
         self._completions: List[Dict[str, Any]] = []
         self._filtered: List[Dict[str, Any]] = []
-        self._last_text_length = 0
 
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -120,32 +118,18 @@ class LspCompleter(QWidget):
     def _on_text_changed(self):
         self._auto_timer.stop()
 
-        current_length = len(self._editor.toPlainText())
-        text_added = current_length > self._last_text_length
-        self._last_text_length = current_length
-
         cursor = self._editor.textCursor()
-        block = cursor.block().text()
-        pos = cursor.positionInBlock()
+        block_text = cursor.block().text()
+        position_in_block = cursor.positionInBlock()
 
-        if pos > 0:
-            last_char = block[pos - 1]
-            if last_char in " ;,()[]{}.<>\n\t":
-                if self.isVisible():
-                    self.hide()
-                return
-
-        if self.isVisible():
-            if text_added:
-                self._auto_timer.start()
-            else:
-                if self._completions:
-                    self._filter_and_show()
-        elif text_added and pos > 0 and block[:pos].strip():
+        if position_in_block > 0 and block_text[:position_in_block].strip():
             self._auto_timer.start()
+        else:
+            if self.isVisible():
+                self.hide()
 
     def _filter_and_show(self):
-        full_prefix, filter_prefix = self._extract_prefix()
+        _, filter_prefix = self._extract_prefix()
 
         if not filter_prefix:
             pfx_lower = ""

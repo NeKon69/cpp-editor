@@ -43,18 +43,6 @@ class OpenedFile:
             lines_to_insert.append(after_text + "\n")
         self.contents[position.line : position.line + 1] = lines_to_insert
 
-    def apply_edit(self, edit: lsp.TextEdit):
-        start = edit.range.start
-        end = edit.range.end
-        new_lines = edit.newText.splitlines(True)
-        if not new_lines:
-            new_lines = [""]
-        line_before = self.contents[start.line][: start.character]
-        line_after = self.contents[end.line][end.character :]
-        new_lines[0] = line_before + new_lines[0]
-        new_lines[-1] = new_lines[-1].rstrip("\r\n") + line_after
-        self.contents[start.line : end.line + 1] = new_lines
-
     def save(self):
         try:
             with open(self.path, "w", encoding="utf-8") as f:

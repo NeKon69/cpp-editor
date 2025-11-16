@@ -5,24 +5,24 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from src.common.vars import log
 
-try:
-    from OpenGL.GL import *
-    from OpenGL.GL.shaders import compileShader, compileProgram
+# try:
+from OpenGL.GL import *
+from OpenGL.GL.shaders import compileShader, compileProgram
 
-    import ctypes.util
+import ctypes.util
 
-    if sys.platform == "win32":
-        libgl = CDLL("opengl32.dll")
-        # On windows for some reason opengl functions get loaded in the global space and not libgl variable, whatever...
-        _glVertexAttribPointer = glVertexAttribPointer
-        _glEnableVertexAttribArray = glEnableVertexAttribArray
-    else:
-        libgl_path = ctypes.util.find_library("GL")
-        if not libgl_path:
-            raise ImportError("Cannot find OpenGL library")
-        libgl = CDLL(libgl_path)
-        _glVertexAttribPointer = libgl.glVertexAttribPointer
-        _glEnableVertexAttribArray = libgl.glEnableVertexAttribArray
+if sys.platform == "win32":
+    libgl = CDLL("opengl32.dll")
+    # On windows for some reason opengl functions get loaded in the global space and not libgl variable, whatever...
+    _glVertexAttribPointer = glVertexAttribPointer
+    _glEnableVertexAttribArray = glEnableVertexAttribArray
+else:
+    libgl_path = ctypes.util.find_library("GL")
+    if not libgl_path:
+        raise ImportError("Cannot find OpenGL library")
+    libgl = CDLL(libgl_path)
+    _glVertexAttribPointer = libgl.glVertexAttribPointer
+    _glEnableVertexAttribArray = libgl.glEnableVertexAttribArray
 
     _glVertexAttribPointer.argtypes = [c_uint, c_uint, c_uint, c_uint, c_uint, c_void_p]
     _glVertexAttribPointer.restype = None
@@ -31,9 +31,9 @@ try:
     _glEnableVertexAttribArray.restype = None
 
     OPENGL_AVAILABLE = True
-except ImportError:
-    OPENGL_AVAILABLE = False
-    log("OpenGL not available you dont have graphics?")
+# except ImportError:
+# OPENGL_AVAILABLE = False
+# log("OpenGL not available you dont have graphics?")
 
 
 class OpenGLBackground(QOpenGLWidget):

@@ -83,31 +83,6 @@ class LspSession:
         )
         self.tick()
 
-    def on_incremental_change(
-        self, file_path: str, change_range: lsp.Range, new_text: str
-    ):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return
-
-        file_obj = self.engine.opened_files[uri]
-        file_obj.version += 1
-
-        change_event = lsp.TextDocumentContentChangeEvent.range_change(
-            change_start=change_range.start,
-            change_end=change_range.end,
-            change_text=new_text,
-            old_text=str(file_obj),
-        )
-
-        self.engine.lsp_client.did_change(
-            text_document=lsp.VersionedTextDocumentIdentifier(
-                uri=uri, version=file_obj.version
-            ),
-            content_changes=[change_event],
-        )
-        self.tick()
-
     def save_file(self, file_path: str):
         uri = self._resolve_uri(file_path)
         if not self._check_file_open(uri, file_path):
@@ -167,33 +142,6 @@ class LspSession:
 
         return None
 
-    def format_document(self, file_path: str) -> bool:
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return False
-
-        msg_id = self.engine.lsp_client.formatting(
-            text_document=lsp.TextDocumentIdentifier(uri=uri),
-            options=lsp.FormattingOptions(tabSize=4, insertSpaces=True),
-        )
-        response = self._send_lsp_request(msg_id)
-        if (
-            response
-            and isinstance(response, lsp.DocumentFormatting)
-            and response.result
-        ):
-            file_obj = self.engine.opened_files[uri]
-            for edit in sorted(
-                response.result,
-                key=lambda e: (e.range.start.line, e.range.start.character),
-                reverse=True,
-            ):
-                file_obj.apply_edit(edit)
-            file_obj.save()
-            log(f"Document formatted: {file_path}")
-            return True
-        return False
-
     def get_hover(self, file_path: str, line: int, character: int):
         uri = self._resolve_uri(file_path)
         if not self._check_file_open(uri, file_path):
@@ -215,30 +163,3 @@ class LspSession:
             uri = self._resolve_uri(file_path)
             return {uri: self.engine.diagnostics.get(uri, [])}
         return dict(self.engine.diagnostics)
-
-    def get_code_actions(self, file_path: str, line: int, character: int):
-        uri = self._resolve_uri(file_path)
-        if not self._check_file_open(uri, file_path):
-            return None
-
-        try:
-            msg_id = self.engine.lsp_client.sendRequest(
-                method="textDocument/codeAction",
-                params={
-                    "textDocument": {"uri": uri},
-                    "range": {
-                        "start": {"line": line, "character": character},
-                        "end": {"line": line, "character": character},
-                    },
-                    "context": {"diagnostics": []},
-                },
-            )
-            response = self._send_lsp_request(msg_id, timeout=2.0)
-
-            if response and hasattr(response, "result") and response.result:
-                return response.result
-
-            return None
-        except Exception as e:
-            log(f"lsp: error getting code actions: {e}")
-            return None
