@@ -1,6 +1,7 @@
 PyQt6
-sansio-lsp-client
 tree-sitter
 tree-sitter-cpp
-PyOpenGL
 Pillow
+numpy
+qdarkstyle
+pydantic

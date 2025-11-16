@@ -117,7 +117,7 @@ class ThemePicker(QDialog):
                 )
                 button.setText(color)
                 button.clicked.connect(
-                    lambda checked, f=field, b=button: self._pick_color(f, b)
+                    lambda _, f=field, b=button: self._pick_color(f, b)
                 )
 
                 self._color_buttons[field] = (button, color)

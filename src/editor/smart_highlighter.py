@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Dict, Optional, List
 from datetime import datetime
-import re
 import traceback
 
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument, QTextCharFormat, QColor
@@ -10,7 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, QObject
 from src.editor.preprocessor import CppPreprocessor
 from src.common.vars import log
 
-from tree_sitter import Language, Parser, Query, QueryCursor, Tree, Node
+from tree_sitter import Language, Parser, QueryCursor, Tree
 import tree_sitter_cpp
 
 

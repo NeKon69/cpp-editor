@@ -1,9 +1,7 @@
 from typing import List, Dict, Any, Tuple
-from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem
 from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent
-from src.common.vars import log
-import time
 
 
 class LspCompleter(QWidget):

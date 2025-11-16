@@ -20,6 +20,7 @@ class TerminalWidget(QWidget):
         self._process = None
         self._working_dir = None
         self._command_start_pos = 0
+        self._interactive_mode = False
 
         self._shell = (
             ("cmd.exe", ["/C"])
@@ -72,13 +73,22 @@ class TerminalWidget(QWidget):
 
     def _append_prompt(self):
         self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
-        self._text_edit.insertPlainText("\n$ ")
+        self._text_edit.setTextColor(QColor("#d4d4d4"))
+
+        text = self._text_edit.toPlainText()
+        if text and not text.endswith("\n"):
+            self._text_edit.insertPlainText("\n")
+
+        self._text_edit.insertPlainText("$ ")
         self._command_start_pos = self._text_edit.textCursor().position()
-        self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+        cursor = self._text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._text_edit.setTextCursor(cursor)
+        self._text_edit.ensureCursorVisible()
         QTimer.singleShot(50, self._text_edit.ensureCursorVisible)
 
     def eventFilter(self, obj, event):
-        if obj == self._text_edit and event.type() == event.KeyPress:
+        if obj == self._text_edit and event.type() == event.Type.KeyPress:
             return self._handle_key_press(event)
         return super().eventFilter(obj, event)
 
@@ -92,14 +102,23 @@ class TerminalWidget(QWidget):
                 return True
 
         if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-            cmd = self._text_edit.toPlainText()[self._command_start_pos :]
-            cmd = cmd.strip()
-            self._text_edit.insertPlainText("\n")
-            if cmd:
-                self.execute_command(cmd)
+            if self._interactive_mode and self._process:
+                input_text = self._text_edit.toPlainText()[self._command_start_pos :]
+                self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+                self._text_edit.insertPlainText("\n")
+                self._process.write((input_text + "\n").encode())
+                self._command_start_pos = self._text_edit.textCursor().position()
+                return True
             else:
-                self._append_prompt()
-            return True
+                cmd = self._text_edit.toPlainText()[self._command_start_pos :]
+                cmd = cmd.strip()
+                self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+                self._text_edit.insertPlainText("\n")
+                if cmd:
+                    self._execute_command(cmd, show_command=False)
+                else:
+                    self._append_prompt()
+                return True
 
         if key in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_Home):
             if pos <= self._command_start_pos:
@@ -117,29 +136,57 @@ class TerminalWidget(QWidget):
     def append_text(self, text: str, error: bool = False):
         self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
         self._text_edit.setTextColor(QColor("#ff5555") if error else QColor("#d4d4d4"))
-        self._text_edit.insertPlainText(text + "\n")
-        self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+        self._text_edit.insertPlainText(text)
+        cursor = self._text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._text_edit.setTextCursor(cursor)
         self._text_edit.ensureCursorVisible()
         QTimer.singleShot(50, self._text_edit.ensureCursorVisible)
 
         buf = self._text_edit.toPlainText()
         if len(buf) > MAX_BUFFER_SIZE:
             self._text_edit.setPlainText(buf[-MAX_BUFFER_SIZE:])
-            self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+            cursor = self._text_edit.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self._text_edit.setTextCursor(cursor)
             self._text_edit.ensureCursorVisible()
             QTimer.singleShot(50, self._text_edit.ensureCursorVisible)
 
     def execute_command(self, command: str):
+        self._execute_command(command, show_command=True)
+
+    def _execute_command(self, command: str, show_command: bool = False):
         if self._process and self._process.state() == QProcess.ProcessState.Running:
-            self.append_text("[Process already running]", True)
+            self.append_text("[Process already running]\n", True)
             self._append_prompt()
             return
 
+        if show_command:
+            cursor = self._text_edit.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+
+            text = self._text_edit.toPlainText()
+            if text.endswith("$ "):
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.PreviousCharacter,
+                    QTextCursor.MoveAnchor,
+                    2,
+                )
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.End, QTextCursor.KeepAnchor
+                )
+                cursor.removeSelectedText()
+
+            self._text_edit.setTextColor(QColor("#50fa7b"))
+            self._text_edit.insertPlainText(f"$ {command}\n")
+
+        self._interactive_mode = True
         self._process = QProcess(self)
+        self._process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self._process.readyReadStandardOutput.connect(self._handle_stdout)
         self._process.readyReadStandardError.connect(self._handle_stderr)
         self._process.finished.connect(self._handle_finished)
-        self._process.started.connect(lambda: self._stop_btn.setEnabled(True))
+        self._process.started.connect(self._on_process_started)
 
         if self._working_dir:
             self._process.setWorkingDirectory(self._working_dir)
@@ -153,27 +200,43 @@ class TerminalWidget(QWidget):
         self._process.start(shell_cmd, shell_args + [command])
 
     @pyqtSlot()
+    def _on_process_started(self):
+        self._stop_btn.setEnabled(True)
+        self._command_start_pos = self._text_edit.textCursor().position()
+
+    @pyqtSlot()
     def _handle_stdout(self):
         data = self._process.readAllStandardOutput().data().decode(errors="ignore")
         if data:
-            self.append_text(data.rstrip())
+            self.append_text(data)
+            self._command_start_pos = self._text_edit.textCursor().position()
 
     @pyqtSlot()
     def _handle_stderr(self):
         data = self._process.readAllStandardError().data().decode(errors="ignore")
         if data:
-            self.append_text(data.rstrip(), True)
+            self.append_text(data, True)
+            self._command_start_pos = self._text_edit.textCursor().position()
 
     @pyqtSlot(int, QProcess.ExitStatus)
     def _handle_finished(self, exit_code, exit_status):
         self._stop_btn.setEnabled(False)
-        self.append_text(f"[Exit code: {exit_code}]", True)
+        self._interactive_mode = False
+
+        if exit_status == QProcess.ExitStatus.CrashExit:
+            self.append_text(f"\n[Process crashed - exit code: {exit_code}]\n", True)
+        else:
+            if exit_code != 0:
+                self.append_text(f"\n[Exit code: {exit_code}]\n", True)
+
         self._process = None
         self._append_prompt()
 
     def _stop_process(self):
         if self._process and self._process.state() == QProcess.ProcessState.Running:
-            self.append_text("^C")
+            self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
+            self._text_edit.setTextColor(QColor("#ffff55"))
+            self._text_edit.insertPlainText("\n^C\n")
             self._process.kill()
 
     def set_title(self, title: str):

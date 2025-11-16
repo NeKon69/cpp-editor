@@ -3,7 +3,6 @@ from ctypes import c_void_p, c_float, c_uint, CDLL
 import sys
 from PyQt6.QtCore import QTimer
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-from PyQt6.QtGui import QSurfaceFormat
 from src.common.vars import log
 
 try:
@@ -14,24 +13,27 @@ try:
 
     if sys.platform == "win32":
         libgl = CDLL("opengl32.dll")
+        # On windows for some reason opengl functions get loaded in the global space and not libgl variable, whatever...
+        _glVertexAttribPointer = glVertexAttribPointer
+        _glEnableVertexAttribArray = glEnableVertexAttribArray
     else:
         libgl_path = ctypes.util.find_library("GL")
         if not libgl_path:
             raise ImportError("Cannot find OpenGL library")
         libgl = CDLL(libgl_path)
+        _glVertexAttribPointer = libgl.glVertexAttribPointer
+        _glEnableVertexAttribArray = libgl.glEnableVertexAttribArray
 
-    _glVertexAttribPointer = libgl.glVertexAttribPointer
     _glVertexAttribPointer.argtypes = [c_uint, c_uint, c_uint, c_uint, c_uint, c_void_p]
     _glVertexAttribPointer.restype = None
 
-    _glEnableVertexAttribArray = libgl.glEnableVertexAttribArray
     _glEnableVertexAttribArray.argtypes = [c_uint]
     _glEnableVertexAttribArray.restype = None
 
     OPENGL_AVAILABLE = True
 except ImportError:
     OPENGL_AVAILABLE = False
-    log("OpenGL not available - install PyOpenGL")
+    log("OpenGL not available you dont have graphics?")
 
 
 class OpenGLBackground(QOpenGLWidget):
@@ -40,11 +42,11 @@ class OpenGLBackground(QOpenGLWidget):
 
         self._initialized = False
         self._main_program = None
-        self._vao = None
-        self._vbo = None
-        self._time = 0.0
-        self._noise_texture = None
-        self._brightness = 0.9
+        self._vao: int = 0
+        self._vbo: int = 0
+        self._time: float = 0.0
+        self._noise_texture: int = 0
+        self._brightness: float = 0.9
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_time)

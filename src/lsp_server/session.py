@@ -64,7 +64,7 @@ class LspSession:
         self.tick()
         log(f"Closed file: {file_path}")
 
-    def on_text_change(self, file_path: str, new_content: str, is_full: bool = True):
+    def on_text_change(self, file_path: str, new_content: str):
         uri = self._resolve_uri(file_path)
         if not self._check_file_open(uri, file_path):
             return
