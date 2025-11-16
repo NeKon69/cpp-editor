@@ -32,8 +32,6 @@ class LspIntegration(QObject):
 
             self._diagnostics_cache[uri] = None
 
-            log(f"lsp: opened file {path}")
-
         except Exception as e:
             log(f"lsp: failed to open file {path}: {e}")
 
@@ -49,15 +47,12 @@ class LspIntegration(QObject):
 
                 self._diagnostics_cache.pop(uri, None)
 
-                log(f"lsp: closed file {path}")
-
         except Exception as e:
             log(f"lsp: failed to close file {path}: {e}")
 
     def save_file(self, path: Path):
         try:
             self._session.save_file(str(path))
-            log(f"lsp: saved file {path}")
 
         except Exception as e:
             log(f"lsp: failed to save file {path}: {e}")
@@ -77,7 +72,6 @@ class LspIntegration(QObject):
     def request_completion(self, path: Path, line: int, character: int):
         try:
             uri = path.as_uri()
-            log(f"lsp_integration: request {uri} line={line} char={character}")
 
             completion_list = self._session.get_completion(str(path), line, character)
 
@@ -87,9 +81,6 @@ class LspIntegration(QObject):
                 and hasattr(completion_list, "items")
                 and completion_list.items
             ):
-                log(
-                    f"lsp_integration: clangd returned {len(completion_list.items)} items"
-                )
                 for item in completion_list.items:
                     items.append(
                         {
@@ -106,7 +97,6 @@ class LspIntegration(QObject):
             else:
                 log(f"lsp_integration: empty or no completion_list")
 
-            log(f"lsp_integration: emitting {len(items)} items")
             self.completion_ready.emit(items)
 
         except Exception as e:

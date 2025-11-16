@@ -35,10 +35,7 @@ class PreprocessWorker(QObject):
                 self.finished.emit("", 0, self.operation_id)
                 return
 
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                original_content = f.read()
-
-            header_line_count = result.header_line_count
+            header_line_count: int = result.header_line_count
             full_lines = result.full_content.split("\n")
 
             if header_line_count > 0 and header_line_count < len(full_lines):
@@ -46,20 +43,6 @@ class PreprocessWorker(QObject):
                 clean_header = "\n".join(clean_header_lines)
             else:
                 clean_header = ""
-
-            cache_file = (
-                self.file_path.parent / f"{self.file_path.stem}_preprocessed.cpp"
-            )
-            full_with_marker = (
-                clean_header
-                + "\n"
-                + original_content
-                + f"\n// SPLICE_LINE: {header_line_count}"
-            )
-            cache_file.write_text(full_with_marker, encoding="utf-8")
-            log(
-                f"[{timestamp()}] Saved to {cache_file.name}, splice={header_line_count}"
-            )
 
             self.finished.emit(clean_header, header_line_count, self.operation_id)
 
@@ -485,13 +468,9 @@ class SmartHighlighter(QSyntaxHighlighter):
     def _on_preprocess_finished(
         self, preprocessed_header, header_line_count, operation_id
     ):
-        log(
-            f"[{timestamp()}] PREPROCESS_DONE id={operation_id} lines={header_line_count}"
-        )
         self._is_preprocessing = False
 
         if self._last_completed_operation > operation_id:
-            log(f"[{timestamp()}] SKIP_OLD id={operation_id}")
             return
 
         self._preprocessed_header = preprocessed_header
@@ -534,14 +513,12 @@ class SmartHighlighter(QSyntaxHighlighter):
     def _on_tree_finished(
         self, tree, captures_by_line, original_line_start, operation_id
     ):
-        log(f"[{timestamp()}] TREE_DONE id={operation_id}")
         self._is_tree_processing = False
 
         if tree is None:
             return
 
         if self._last_completed_operation > operation_id:
-            log(f"[{timestamp()}] SKIP_OLD_TREE id={operation_id}")
             return
 
         self._last_completed_operation = operation_id
@@ -549,7 +526,6 @@ class SmartHighlighter(QSyntaxHighlighter):
         self._captures_by_line = captures_by_line
         self._original_line_start = original_line_start
 
-        log(f"[{timestamp()}] REHIGHLIGHT id={operation_id}")
         self.rehighlight()
 
     def highlightBlock(self, text: str):
@@ -574,7 +550,6 @@ class SmartHighlighter(QSyntaxHighlighter):
 
         self._operation_counter += 1
         operation_id = self._operation_counter
-        log(f"[{timestamp()}] TRIGGER_LIGHT reason={reason} id={operation_id}")
 
         if self._original_line_start > 0 and self._preprocessed_header:
             full_content = self._preprocessed_header + "\n" + content

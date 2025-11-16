@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem
 from PyQt6.QtGui import QTextCursor, QFont, QKeyEvent
@@ -222,7 +222,7 @@ class LspCompleter(QWidget):
         label = item.data(Qt.ItemDataRole.UserRole)
         cursor = self._editor.textCursor()
 
-        full_prefix, filter_prefix = self._extract_prefix()
+        _, filter_prefix = self._extract_prefix()
 
         for _ in range(len(filter_prefix)):
             cursor.deletePreviousChar()

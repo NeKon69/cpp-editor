@@ -105,9 +105,6 @@ class LspEngine:
             uri = event.uri
             with self._diagnostics_lock:
                 self.diagnostics[uri] = event.diagnostics
-            log(f"Received {len(event.diagnostics)} diagnostics for {uri}")
-            for diag in event.diagnostics:
-                log(f"  - L{diag.range.start.line+1}: {diag.message}")
         elif isinstance(event, lsp.ShowMessage):
             log(f"[Server message {event.type.name}]: {event.message}")
         elif isinstance(event, lsp.LogMessage):
@@ -146,6 +143,5 @@ class LspEngine:
         elif isinstance(event, lsp.MethodResponse) and event.message_id is not None:
             with self._response_lock:
                 self.responses[event.message_id] = event
-            log(f"Stored response for message_id {event.message_id}")
         else:
             log(f"Unhandled event of type {type(event).__name__}")

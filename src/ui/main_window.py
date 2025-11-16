@@ -4,7 +4,7 @@ from PyQt6.QtCore import QTimer, QSize
 from PyQt6.QtWidgets import QMainWindow, QFileDialog
 
 from src.common.vars import log
-from src.configs.build_config import BuildHelper
+from src.configs.build_config import BuildConfig
 from src.ui.main_front import MainFront
 from src.ui.main_back import MainBack
 

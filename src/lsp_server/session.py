@@ -53,7 +53,6 @@ class LspSession:
             )
         )
         self.tick()
-        log(f"Opened file: {path_obj}")
 
     def close_file(self, file_path: str):
         uri = self._resolve_uri(file_path)
@@ -62,7 +61,6 @@ class LspSession:
         del self.engine.opened_files[uri]
         self.engine.lsp_client.did_close(lsp.TextDocumentIdentifier(uri=uri))
         self.tick()
-        log(f"Closed file: {file_path}")
 
     def on_text_change(self, file_path: str, new_content: str):
         uri = self._resolve_uri(file_path)
@@ -94,7 +92,6 @@ class LspSession:
             lsp.TextDocumentIdentifier(uri=uri), text=str(file_obj)
         )
         self.tick()
-        log(f"Saved file: {file_path}")
 
     def _send_lsp_request(self, msg_id: int, timeout: float = 2.0) -> Optional[Any]:
         self.tick()
@@ -111,8 +108,6 @@ class LspSession:
             log(f"session: file not open")
             return None
 
-        log(f"session: request {file_path} line={line} char={character}")
-
         msg_id = self.engine.lsp_client.completion(
             lsp.TextDocumentPosition(
                 textDocument=lsp.TextDocumentIdentifier(uri=uri),
@@ -120,11 +115,7 @@ class LspSession:
             )
         )
 
-        log(f"session: sent msg_id={msg_id} type={type(msg_id)}")
-
         response = self._send_lsp_request(msg_id)
-
-        log(f"session: response type={type(response).__name__ if response else 'None'}")
 
         if response and isinstance(response, lsp.Completion):
             if hasattr(response, "completion_list") and response.completion_list:
@@ -133,7 +124,6 @@ class LspSession:
                     if response.completion_list.items
                     else 0
                 )
-                log(f"session: completion_list has {items_count} items")
                 return response.completion_list
             else:
                 log(f"session: no completion_list in response")

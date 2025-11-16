@@ -10,8 +10,6 @@ from src.editor.smart_highlighter import SmartHighlighter
 
 
 class EditorBack:
-    """Handles all logic/behavior aspects of the editor."""
-
     def __init__(self, editor: QPlainTextEdit, config: EditorConfig):
         self._editor = editor
         self._config = config
@@ -78,14 +76,14 @@ class EditorBack:
                 return
 
             self._last_highlighted_content = content
-            self._highlighter.update_tree(content, "300ms_edit")
+            self._highlighter.update_tree(content, "1000ms_edit")
 
     def _trigger_heavy_highlight(self):
         if self._file_path:
             self.save_file()
 
         if self._highlighter and self._file_path:
-            self._highlighter.preprocess_file(self._file_path, "5s_hash_edit")
+            self._highlighter.preprocess_file(self._file_path, "5s_directives_edit")
 
     def handle_key_press(self, event: QKeyEvent) -> bool:
         """Returns True if event was handled, False otherwise."""
@@ -141,7 +139,7 @@ class EditorBack:
         char = event.text()
         cursor = self._editor.textCursor()
 
-        if not self._should_auto_close(cursor, char):
+        if not self._should_auto_close(cursor):
             return False
 
         cursor.insertText(char)
@@ -233,7 +231,7 @@ class EditorBack:
         indent = len(text) - len(text.lstrip())
         return text[:indent]
 
-    def _should_auto_close(self, cursor: QTextCursor, char: str) -> bool:
+    def _should_auto_close(self, cursor: QTextCursor) -> bool:
         pos = cursor.positionInBlock()
         block_text = cursor.block().text()
 
