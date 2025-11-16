@@ -6,6 +6,7 @@ import re
 import hashlib
 import json
 import traceback
+import shlex
 
 from src.common.vars import log
 
@@ -174,9 +175,7 @@ class CppPreprocessor:
 
     def _get_include_dirs(self, file_path: Path) -> list:
         try:
-            compile_commands_path = (
-                self.project_path / "build" / "compile_commands.json"
-            )
+            compile_commands_path = self.project_path / "compile_commands.json"
 
             if not compile_commands_path.exists():
                 return [".", "include", "src"]
@@ -184,22 +183,33 @@ class CppPreprocessor:
             with open(compile_commands_path) as f:
                 commands = json.load(f)
 
-            file_abs_path = str(file_path.resolve())
+            file_abs_path = file_path.resolve()
             for cmd in commands:
-                cmd_file_path = str(
-                    Path(cmd.get("directory", "."), cmd.get("file", "")).resolve()
-                )
+                cmd_file_path = Path(
+                    cmd.get("directory", ""), cmd.get("file", "")
+                ).resolve()
+
                 if cmd_file_path == file_abs_path:
-                    args = cmd.get("arguments", [])
+                    args = cmd.get("arguments")
+                    if args is None:
+                        command_str = cmd.get("command")
+                        if command_str:
+                            args = shlex.split(command_str)
+                        else:
+                            continue
+
                     include_dirs = []
                     i = 0
                     while i < len(args):
                         arg = args[i]
-                        if arg == "-I" and i + 1 < len(args):
+                        if arg in ("-I", "-isystem") and i + 1 < len(args):
                             include_dirs.append(args[i + 1])
                             i += 2
                         elif arg.startswith("-I"):
                             include_dirs.append(arg[2:])
+                            i += 1
+                        elif arg.startswith("-isystem"):
+                            include_dirs.append(arg[len("-isystem") :])
                             i += 1
                         else:
                             i += 1
@@ -207,6 +217,8 @@ class CppPreprocessor:
                     if include_dirs:
                         return include_dirs
 
+                    break
+
             return [".", "include", "src"]
-        except Exception as e:
+        except Exception:
             return [".", "include", "src"]
