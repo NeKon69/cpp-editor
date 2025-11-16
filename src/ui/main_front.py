@@ -38,7 +38,7 @@ class MainFront(QWidget):
         self._project_path = project_path
         self._editor_config = editor_config
 
-        self._bg_enabled = True
+        self._bg_enabled = False
         self._bg_opacity = 200
         self._bg_brightness = 0.6
 

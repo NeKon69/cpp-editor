@@ -1,11 +1,8 @@
--- nvim-tree state | last updated: 2025-11-16 16:00:06
+-- nvim-tree state | last updated: 2025-11-16 17:24:03
 return {
-  timestamp = 1763298006,
+  timestamp = 1763303043,
   open_dirs = {
     "src",
-    "src/configs",
-    "src/editor",
     "src/lsp_server",
-    "src/ui",
   },
 }
