@@ -8,11 +8,14 @@ from src.common.vars import log
 
 
 def main():
-    project_path = Path.cwd() / "lsp_test_project"
+    if len(sys.argv) > 1:
+        project_path = Path(sys.argv[1])
+    else:
+        project_path = Path.cwd()
 
     if not project_path.exists():
         log(f"project path does not exist: {project_path}")
-        return
+        project_path = Path.cwd()
 
     app = QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api="pyqt6"))
