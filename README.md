@@ -26,5 +26,6 @@ Tired of IDEs that are fast, stable, and support more than one programming langu
 -   **CRITICAL STEP:** Make sure you have a `compile_commands.json` file in your project root. If you don't, my editor will try to generate a default one that is guaranteed to be wrong. And because I am evil i will not tell you what structure it should contain, but any C++ developer know it's structure, so you should be qualified and prove that you are worthy to use this editor!
 -   Then just start coding in the best language ever, which is as we know is C++.
 -   There are some shortcuts but you can learn all of them by looking at the top bar of the app, and seeing stuff such as "File", "View", etc.. Click on them and you'll see what is available!
+-   Here are some of them: Use `Ctrl+Space` for forced autocomplete request to lsp server, Use `Ctrl+~` to show errors in the current line! (most important feature)
 
 # I HOPE YOU ENJOY THIS APP, if you dont, then you are probably a python programmer, which means your opinion doesn't matter anyway. I was forced to use python for this, so don't blame me. Now go debug your null pointer.
