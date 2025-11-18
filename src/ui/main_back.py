@@ -1,14 +1,11 @@
 from pathlib import Path
 from typing import Optional
-import json
-import sqlite3
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from src.common.vars import log
 from src.common.global_settings_db import GlobalSettingsDB
 from src.configs.editor_config import EditorConfig
-from src.editor.build_helper import BuildHelper
 from src.editor.lsp_integration import LspIntegration
 from src.editor.build_helper import BuildHelper
 from src.lsp_server.session import LspSession
@@ -87,10 +84,6 @@ class MainBack(QObject):
 
         except Exception as e:
             log(f"failed to open file {path}: {e}")
-
-    def on_file_loaded(self, path: Path, content: str):
-        if self._is_supported_file(path):
-            self._lsp_integration.open_file(path, content)
 
     @pyqtSlot(str)
     def on_text_changed(self, text: str):

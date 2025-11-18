@@ -1,4 +1,4 @@
-import sys
+import sys, os
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 import qdarkstyle
@@ -13,7 +13,7 @@ def main():
     else:
         project_path = Path.cwd()
 
-    if not project_path.exists():
+    if not os.path.isdir(project_path):
         log(f"project path does not exist: {project_path}")
         project_path = Path.cwd()
 

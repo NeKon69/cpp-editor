@@ -22,7 +22,6 @@ class MainFront(QWidget):
     diagnostic_clicked = pyqtSignal(int, int)
 
     open_project_requested = pyqtSignal()
-    open_file_requested = pyqtSignal()
     save_requested = pyqtSignal()
     format_requested = pyqtSignal()
     build_requested = pyqtSignal()
@@ -196,11 +195,6 @@ class MainFront(QWidget):
         open_project_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
         open_project_action.triggered.connect(self.open_project_requested.emit)
         file_menu.addAction(open_project_action)
-
-        open_action = QAction("Open File", self)
-        open_action.setShortcut(QKeySequence("Ctrl+O"))
-        open_action.triggered.connect(self.open_file_requested.emit)
-        file_menu.addAction(open_action)
 
         save_action = QAction("Save", self)
         save_action.setShortcut(QKeySequence("Ctrl+S"))

@@ -55,7 +55,6 @@ class MainWindow(QMainWindow):
 
     def _connect_back_to_front(self):
         self._back.diagnostics_updated.connect(self._on_diagnostics_updated)
-        self._back.file_opened.connect(self._on_file_opened)
         self._back.project_changed.connect(self._on_project_changed)
 
     def _connect_editor_signals(self):
@@ -67,17 +66,10 @@ class MainWindow(QMainWindow):
 
     def _connect_ui_actions(self):
         self._front.open_project_requested.connect(self._open_project)
-        self._front.open_file_requested.connect(self._open_file)
         self._front.theme_picker_requested.connect(self._open_theme_picker)
         self._front.bg_settings_requested.connect(self._open_bg_settings)
         self._front.build_settings_requested.connect(self._open_build_settings)
         self._front.diagnostic_clicked.connect(self._on_diagnostic_clicked)
-
-    def _on_file_opened(self, path: Path):
-        editor = self._front.get_editor()
-        if editor.load_file(path):
-            content = editor.toPlainText()
-            self._back.on_file_loaded(path, content)
 
     def _on_save_requested(self):
         editor = self._front.get_editor()
